@@ -288,13 +288,13 @@ HASHTAG_MAP = {
     # 【v3改善】非会員ユーザーにリーチしやすいタグ構成
     # #AV や #FANZAおすすめ は既存会員ばかりに届く傾向があるため変更
     # 一般エンタメ・動画系タグで間口を広げ、FANZA未登録層にアプローチ
-    'videoa': '#アダルト動画 #FANZA #PR',
-    'videoc': '#素人動画 #FANZA #個人撮影 #PR',
-    'anime':  '#エロアニメ #FANZA #アニメ好き #PR',
-    'doujin': '#同人誌 #FANZA #エロ同人 #PR',
-    'comic':  '#エロ漫画 #FANZA #電子書籍 #PR',
-    'goods':  '#大人グッズ #FANZA #PR',
-    'default': '#FANZA #アダルト動画 #PR',
+    'videoa': '#アダルト動画 #FANZA ',
+    'videoc': '#素人動画 #FANZA #個人撮影 ',
+    'anime':  '#エロアニメ #FANZA #アニメ好き ',
+    'doujin': '#同人誌 #FANZA #エロ同人 ',
+    'comic':  '#エロ漫画 #FANZA #電子書籍 ',
+    'goods':  '#大人グッズ #FANZA ',
+    'default': '#FANZA #アダルト動画 ',
 }
 
 # ジャンル別の追加ハッシュタグ（genre_tagsで使うジャンル名に加えて付与する）
@@ -823,15 +823,15 @@ def build_x_single_post(product, char_limit=280):
 
     文字数が厳しい場合に削る優先順位（上ほど先に削る）:
       1. NTR作品の概要（コピー文）
-      2. 汎用ハッシュタグ（#アダルト動画 等）※ #PR は広告表記のため必ず残す
+      2. 汎用ハッシュタグ（#アダルト動画 等）※ 
       3. タイトルの表示文字数
       4. 出演者タグを3名→1名に
       5. ジャンル・性癖系ハッシュタグを1件に
     金額・出演者最低1名・アフィリエイトURL・#PRは常に含む。
     """
     hashtags = HASHTAG_MAP.get(DMM_FLOOR, HASHTAG_MAP['default'])
-    # 広告表記として必須の #PR に加え、#FANZA も必ず残す最小構成
-    minimal_disclosure_tags = '#FANZA #PR'
+    # 広告表記として必須の #FANZA も必ず残す最小構成
+    minimal_disclosure_tags = '#FANZA '
     url = clean_url(product['affiliate_url'])
     sample_full = clean_url(product.get('sample_movie_url', ''))
 
@@ -905,7 +905,7 @@ def build_x_single_post(product, char_limit=280):
         text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
 
     if x_text_length(text) > char_limit:
-        # 2) 汎用ハッシュタグを最小限（#PR・#FANZAのみ）にする
+        # 2) 汎用ハッシュタグを最小限（#FANZAのみ）にする
         base_tags = minimal_disclosure_tags
         text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
 
