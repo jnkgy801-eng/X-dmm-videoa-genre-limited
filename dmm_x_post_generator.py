@@ -149,6 +149,13 @@ if GENRE_FILTER_ENABLED:
 else:
     print('🎯 ジャンル特化フィルター: なし（全ジャンル対象）')
 
+# NTR（寝取り・寝取られ）ジャンル特化時は、投稿文の煽り文・見出しをNTR向けの
+# 訴求内容に寄せる。DMM_ARTICLE_IDでジャンルを判定する（genresearch.py参照）。
+NTR_GENRE_IDS = {'4111'}
+IS_NTR_FOCUSED = (
+    GENRE_FILTER_ENABLED and DMM_ARTICLE == 'genre' and DMM_ARTICLE_ID in NTR_GENRE_IDS
+)
+
 def parse_price_range(range_str):
     """価格範囲文字列を (min, max) のタプルに変換する。max=Noneは上限なし。"""
     if not range_str or range_str == 'all':
@@ -371,6 +378,23 @@ COPY_TEMPLATES = [
     "無料サンプルの時点で期待値がかなり上がった。本編まで見て裏切られなかったやつ",
     "レビューが伸びてる作品は当たりの確率が体感で全然違う。今回はまさにそのパターン",
     "サンプルだけ見て判断つかない人向けに言うと、本編は最初の展開がさらに続くタイプ",
+]
+
+# 【NTR特化】DMM_ARTICLE_IDがNTRジャンルの場合に通常のCOPY_TEMPLATESへ追加する専用コピー。
+# 「寝取る側／寝取られる側どちらの心理も描けているか」「同意の上での関係性の変化」など、
+# このジャンル特有の“ギャップ・緊張感・背徳感”を訴求軸にする。露骨な性描写ではなく、
+# 作品の見どころ・引き込まれるポイントを言語化する方向で統一。
+NTR_COPY_TEMPLATES = [
+    "寝取られる側の心理描写がちゃんと丁寧なタイプ。ただ寝取るだけの雑な展開じゃないから引き込まれる",
+    "見てる側の嫉妬心を煽ってくる作りが上手い。NTR系は結局この“揺さぶり方”で当たり外れが決まる",
+    "最初は普通の関係だったのが少しずつ崩れていく過程が丁寧。一気に堕ちるタイプより刺さる人多いと思う",
+    "寝取る側の余裕と、気づいていく側の焦りの対比がしっかり描かれてて没入感が違った",
+    "NTRは背徳感の積み上げ方が命だと思ってるけど、これはその積み上げ方がうまい部類",
+    "同じ寝取られ物でも、関係性の説明を端折らないタイプは満足度が高い。今回はまさにそれ",
+    "罪悪感と快楽のバランスが極端じゃなくて、変にリアリティがあるから見入ってしまう",
+    "寝取られ好きに刺さるポイントを分かってる作り。中途半端に匂わせて終わらないタイプ",
+    "この手のジャンルは表情の演技力で差が出ると思ってるけど、そこがちゃんとしてた",
+    "関係が壊れていく“過程”にちゃんと尺を使ってるから、結末までの説得力がある",
 ]
 
 
@@ -863,7 +887,15 @@ def build_x_single_post(product, char_limit=280):
         "配信されたばかりの新着、これは早めに見て👇",
         "出たばかりでまだ知らない人多いはず👇",
     ]
-    if is_recent_release(product) and random.random() < 0.5:
+    NTR_HEADERS = [
+        "寝取られ好きなら見ておくべきやつ👇",
+        "NTR好きにはたまらない展開だった👇",
+        "寝取り・寝取られ系でこれは刺さる人多いはず👇",
+        "背徳感がちゃんとしてるNTR、これ👇",
+    ]
+    if IS_NTR_FOCUSED and random.random() < 0.5:
+        header = random.choice(NTR_HEADERS)
+    elif is_recent_release(product) and random.random() < 0.5:
         header = random.choice(RECENT_HEADERS)
     elif product.get('review_count') and product['review_count'] >= 30 and random.random() < 0.4:
         header = random.choice(SOCIAL_PROOF_HEADERS)
@@ -872,7 +904,7 @@ def build_x_single_post(product, char_limit=280):
     else:
         header = random.choice(HEADERS)
 
-    hook = random.choice(COPY_TEMPLATES)
+    hook = random.choice(COPY_TEMPLATES + NTR_COPY_TEMPLATES) if IS_NTR_FOCUSED else random.choice(COPY_TEMPLATES)
 
     # 【v8改善】サンプル動画は登録不要で視聴できるため、
     # 「サンプルを見るために登録が必要」という誤解を避け、
