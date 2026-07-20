@@ -17,12 +17,12 @@ on:
       dmm_sort_mode:
         description: 'ソートモード（自動投稿は選択に関わらず常に新着順で投稿されます）'
         required: false
-        default: 'date'
+        default: 'rank'
         type: choice
         options:
-          - date   # 新着順のみ（デフォルト。自動投稿のデフォルト動作と一致）
+          - rank   # 人気順のみ（デフォルト）
+          - date   # 新着順のみ
           - both   # 新着＋人気の両方をテキストファイルに保存
-          - rank   # 人気順のみ
       dmm_floor:
         description: 'フロア種別'
         required: false
@@ -61,12 +61,12 @@ on:
       dmm_article:
         description: 'ジャンル絞り込み種別（genre=ジャンル指定 / actress=女優指定 等。空欄で絞り込みなし）'
         required: false
-        default: ''
+        default: 'genre'
         type: string
       dmm_article_id:
         description: 'ジャンル絞り込みID（DMM APIのgenre一覧等から取得したID。1件のみ指定可）'
         required: false
-        default: ''
+        default: '4111'
         type: string
       min_process_count:
         description: '価格フィルター使用時の最低保証件数（この件数に達するまで追加取得）'
@@ -116,11 +116,11 @@ jobs:
           DMM_API_ID:           ${{ secrets.DMM_API_ID }}
           DMM_AFFILIATE_ID:     ${{ secrets.DMM_AFFILIATE_ID }}
           POST_START_INDEX:     ${{ github.event.inputs.post_start_index }}
-          DMM_SORT_MODE:        ${{ github.event.inputs.dmm_sort_mode || 'date' }}
+          DMM_SORT_MODE:        ${{ github.event.inputs.dmm_sort_mode || 'rank' }}
           DMM_FLOOR:            ${{ github.event.inputs.dmm_floor || 'videoa' }}
           DMM_PRICE_RANGE:      ${{ github.event.inputs.dmm_price_range || 'all' }}
-          DMM_ARTICLE:          ${{ github.event.inputs.dmm_article || vars.DMM_ARTICLE || '' }}
-          DMM_ARTICLE_ID:       ${{ github.event.inputs.dmm_article_id || vars.DMM_ARTICLE_ID || '' }}
+          DMM_ARTICLE:          ${{ github.event.inputs.dmm_article || vars.DMM_ARTICLE || 'genre' }}
+          DMM_ARTICLE_ID:       ${{ github.event.inputs.dmm_article_id || vars.DMM_ARTICLE_ID || '4111' }}
           MIN_PROCESS_COUNT:    ${{ github.event.inputs.min_process_count || '10' }}
           SAVE_TO_REPO:         'true'
           AUTO_POST_TO_X:       ${{ github.event.inputs.auto_post_to_x || 'true' }}
