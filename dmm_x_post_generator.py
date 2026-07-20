@@ -481,7 +481,14 @@ def truncate_to_weighted_length(text, max_len):
 
 # ----------------------------------------------------------------
 # 🔗 URL確認
+#    投稿文生成のたびにアフィリエイトURL・サンプル動画URLへHTTPリクエストを送って
+#    生死確認する機能。結果は保存されるテキストファイルの表示（OK/NG）にしか使われず、
+#    投稿するかどうかの判定には影響しない。候補が多いと大量のHTTPリクエストが
+#    直列で走り処理時間が大きく伸びるため、デフォルトは無効（スキップ）にしている。
+#    ENABLE_URL_CHECK=true で有効化できる。
 # ----------------------------------------------------------------
+ENABLE_URL_CHECK = os.environ.get('ENABLE_URL_CHECK', 'false').strip().lower() in ('1', 'true', 'yes')
+
 
 def check_url(url, timeout=8):
     """URLが実際にアクセス可能かHEADリクエストで確認する。結果はTrue/False/None(未確認)。"""
@@ -804,11 +811,11 @@ def build_x_single_post(product, char_limit=280):
     url_full = clean_url(product['affiliate_url'])
     sample_full = clean_url(product.get('sample_movie_url', ''))
 
-    url_ok = check_url(url_full) if url_full else None
+    url_ok = check_url(url_full) if (url_full and ENABLE_URL_CHECK) else None
     if url_full and url_ok is False:
         print(f"    ⚠️  アフィリエイトURLにアクセスできませんでした: {url_full}")
     product['url_check'] = url_ok
-    product['sample_check'] = check_url(sample_full) if sample_full else None
+    product['sample_check'] = check_url(sample_full) if (sample_full and ENABLE_URL_CHECK) else None
 
     url = url_full
     title = product['title']
