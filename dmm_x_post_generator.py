@@ -818,112 +818,49 @@ def x_text_length(text):
 
 
 def build_x_single_post(product, char_limit=280):
-    """スレッドではなく1ポストで完結する投稿文を生成する。
+    """1ポストで完結する投稿文を「作品名・値段・出演者・アフィリエイトURL・ハッシュタグ・
+    NTR作品の概要」の6要素だけで組み立てる。見出し・CTA・一言コメントは含めない。
 
-    文字数が厳しい場合に削る優先順位（上ほど先に削る＝軽視、下ほど残す＝重視）:
-      1. おすすめポイント（コピー文）
-      2. 汎用ハッシュタグ（#アダルト動画 #FANZA）※ #PR は広告表記のため必ず残す
+    文字数が厳しい場合に削る優先順位（上ほど先に削る）:
+      1. NTR作品の概要（コピー文）
+      2. 汎用ハッシュタグ（#アダルト動画 等）※ #PR は広告表記のため必ず残す
       3. タイトルの表示文字数
-      4. 価格表示
-      5. 出演者タグ（👤）※できる限り残す
-      6. ジャンル・性癖系ハッシュタグ（🏷）※最優先で残す（Xで検索されやすくするため）
-    見出し・CTA・アフィリエイトURLは常に含む。
+      4. 出演者タグを3名→1名に
+      5. ジャンル・性癖系ハッシュタグを1件に
+    金額・出演者最低1名・アフィリエイトURL・#PRは常に含む。
     """
     hashtags = HASHTAG_MAP.get(DMM_FLOOR, HASHTAG_MAP['default'])
     # 広告表記として必須の #PR に加え、#FANZA も必ず残す最小構成
     minimal_disclosure_tags = '#FANZA #PR'
-    url_full = clean_url(product['affiliate_url'])
+    url = clean_url(product['affiliate_url'])
     sample_full = clean_url(product.get('sample_movie_url', ''))
 
-    url_ok = check_url(url_full) if (url_full and ENABLE_URL_CHECK) else None
-    if url_full and url_ok is False:
-        print(f"    ⚠️  アフィリエイトURLにアクセスできませんでした: {url_full}")
+    url_ok = check_url(url) if (url and ENABLE_URL_CHECK) else None
+    if url and url_ok is False:
+        print(f"    ⚠️  アフィリエイトURLにアクセスできませんでした: {url}")
     product['url_check'] = url_ok
     product['sample_check'] = check_url(sample_full) if (sample_full and ENABLE_URL_CHECK) else None
 
-    url = url_full
     title = product['title']
 
     def title_line(limit):
         t = (title[:limit] + '…') if len(title) > limit else title
         return f"📽 {t}"
 
-    def extra_genre_hashtags(genre_list):
-        extras = [GENRE_EXTRA_HASHTAG_MAP[g] for g in genre_list if g in GENRE_EXTRA_HASHTAG_MAP]
-        return '　'.join(extras)
-
-    def genre_tag_line(genre_list):
-        # ジャンル本体のハッシュタグ（#人妻 #NTR 等、性癖系を含む）＋ 検索向けの言い換えタグ
-        # #4K・#独占配信は投稿文には不要なため除外する
-        filtered = filter_hashtag_genres(genre_list)
+    def genre_tag_line(genre_limit):
+        genres = prioritize_genres(filter_hashtag_genres(product['genres']))[:genre_limit] if genre_limit else []
+        filtered = filter_hashtag_genres(genres)
         parts = []
         gt = genre_tags(filtered)
         if gt:
             parts.append(gt)
-        extra = extra_genre_hashtags(filtered)
-        if extra:
-            parts.append(extra)
+        extras = [GENRE_EXTRA_HASHTAG_MAP[g] for g in filtered if g in GENRE_EXTRA_HASHTAG_MAP]
+        if extras:
+            parts.append('　'.join(extras))
         return dedupe_hashtag_line('　'.join(parts))
 
-    HEADERS = [
-        "今夜これ正解だった👇",
-        "FANZAのサンプル、これは必見👇",
-        "無料で見られるやつ教える👇",
-        "これは損しない作品だった👇",
-        "FANZAで話題になってた作品👇",
-        "無料サンプルだけでも見て👇",
-        "今夜のためにこれ置いとく👇",
-    ]
-    LOSS_AVERSION_HEADERS = [
-        "これ見逃してる人、地味に損してるかもしれない👇",
-        "スルーした人だけ気づいてないやつ👇",
-        "見ないまま寝ると後で気になるタイプ👇",
-    ]
-    SOCIAL_PROOF_HEADERS = [
-        "レビューの数、地味にすごいことになってる👇",
-        "評価が集まってる理由、見ればわかる👇",
-    ]
-    RECENT_HEADERS = [
-        "配信されたばかりの新着、これは早めに見て👇",
-        "出たばかりでまだ知らない人多いはず👇",
-    ]
-    NTR_HEADERS = [
-        "寝取られ好きなら見ておくべきやつ👇",
-        "NTR好きにはたまらない展開だった👇",
-        "寝取り・寝取られ系でこれは刺さる人多いはず👇",
-        "背徳感がちゃんとしてるNTR、これ👇",
-    ]
-    if IS_NTR_FOCUSED and random.random() < 0.5:
-        header = random.choice(NTR_HEADERS)
-    elif is_recent_release(product) and random.random() < 0.5:
-        header = random.choice(RECENT_HEADERS)
-    elif product.get('review_count') and product['review_count'] >= 30 and random.random() < 0.4:
-        header = random.choice(SOCIAL_PROOF_HEADERS)
-    elif random.random() < 0.35:
-        header = random.choice(LOSS_AVERSION_HEADERS)
-    else:
-        header = random.choice(HEADERS)
-
-    hook = random.choice(COPY_TEMPLATES + NTR_COPY_TEMPLATES) if IS_NTR_FOCUSED else random.choice(COPY_TEMPLATES)
-
-    # 【v8改善】サンプル動画は登録不要で視聴できるため、
-    # 「サンプルを見るために登録が必要」という誤解を避け、
-    # 会員登録は「購入するとき」のものとして訴求順序を後ろに整理。
-    BUY_CTAS = [
-        "🛒 気に入ったら購入。会員登録はそのときで大丈夫です👇",
-        "🛒 サンプルは登録不要。購入する時だけ無料会員登録すればOK👇",
-        "🛒 続きが気になったら購入へ。会員登録は購入時の1回だけ👇",
-        "🛒 今の価格で購入できます（FANZAは値段変動あり）👇",
-        "🛒 サンプルで気になった続きは本編だけ。購入はこちらから👇",
-    ]
-    OTHER_CTAS = [
-        "📌 サンプルは登録不要。購入するときだけ会員登録すればOKです👇",
-        "📌 気に入ったら購入はこちらから（会員登録は購入時でOK）👇",
-    ]
-    if is_recent_release(product):
-        BUY_CTAS.append("🛒 配信されたばかりの新着です。気に入ったらそのまま購入できます👇")
-        OTHER_CTAS.append("📌 配信されたばかりの新着です。サンプル確認→購入はこちら👇")
-    cta = random.choice(BUY_CTAS if DMM_FLOOR == 'videoa' else OTHER_CTAS)
+    # NTR作品の概要（NTR系ジャンルの場合はNTR特化の概要テンプレ、それ以外は汎用テンプレ）
+    overview = random.choice(NTR_COPY_TEMPLATES if IS_NTR_FOCUSED else COPY_TEMPLATES)
 
     # 【bot感対策】毎回同じ絵文字にならないようランダムに選ぶ
     PRICE_EMOJIS = ['💰', '🪙']
@@ -931,154 +868,80 @@ def build_x_single_post(product, char_limit=280):
     price_emoji = random.choice(PRICE_EMOJIS)
     actor_emoji = random.choice(ACTOR_EMOJIS)
 
-    # 【bot感対策】たまに素の感想を一言添える（毎回だと逆にテンプレ化するので3割程度）
-    POSTSCRIPTS = [
-        "地味に良かった",
-        "思ったより普通に良かった",
-        "サンプルだけでも満足度高い",
-        "個人的にはアタリだった",
-        "何回か見返した",
-    ]
-    postscript = random.choice(POSTSCRIPTS) if random.random() < 0.3 else ''
+    def price_line():
+        return f"{price_emoji} {product['price']}" if product.get('price') else None
 
-    # 【bot感対策・大枠】"おすすめポイント文(hook)" と "CTA・価格・出演者・一言をまとめた情報スタック"
-    # のどちらを先に出すかをランダム化し、さらに情報スタック内の行の並び順もランダム化する。
-    # これにより「見出し→タイトル→煽り文→CTA→価格→出演者→URL→タグ」という固定構成を崩す。
-    hook_before_info = random.random() < 0.5
-    info_block_order = ['cta', 'price', 'actor', 'postscript']
-    random.shuffle(info_block_order)
-
-    def price_label():
-        if not product['price']:
-            return None
-        price_num = product.get('price_num')
-        if price_num and price_num <= 500:
-            return f"{price_emoji} {product['price']}（ワンコイン以下）"
-        elif price_num and price_num <= 1000:
-            return f"{price_emoji} {product['price']}（缶ビール数本分）"
-        elif price_num and price_num <= 2000:
-            return f"{price_emoji} {product['price']}（映画1本分以下）"
-        return f"{price_emoji} {product['price']}"
-
-    def assemble(hook_text, base_tags, title_limit, include_price, actor_limit, genre_limit, allow_postscript=False):
-        header_block = [header, title_line(title_limit)]
-
-        price_line = price_label() if include_price else None
+    def assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview_text):
         actors = product['actors'][:actor_limit] if actor_limit else []
         act_tags = actor_tags(actors)
-        actor_line = f"{actor_emoji} {act_tags}" if act_tags else None
-        ps_line = postscript if (allow_postscript and postscript) else None
 
-        info_line_map = {'cta': cta, 'price': price_line, 'actor': actor_line, 'postscript': ps_line}
-        info_lines = [info_line_map[k] for k in info_block_order if info_line_map[k]]
-        info_block = '\n'.join(info_lines)
+        lines = [title_line(title_limit)]
+        if include_overview and overview_text:
+            lines.append(f"📝 {overview_text}")
+        p_line = price_line()
+        if p_line:
+            lines.append(p_line)
+        if act_tags:
+            lines.append(f"{actor_emoji} {act_tags}")
 
-        if hook_text and info_block:
-            body = f"{hook_text}\n\n{info_block}" if hook_before_info else f"{info_block}\n\n{hook_text}"
-        else:
-            body = hook_text or info_block
-
-        genres = prioritize_genres(filter_hashtag_genres(product['genres']))[:genre_limit] if genre_limit else []
-        g_line = genre_tag_line(genres)
+        g_line = genre_tag_line(genre_limit)
         tag_line = dedupe_hashtag_line('　'.join(t for t in [g_line, base_tags] if t))
 
-        return '\n\n'.join(['\n'.join(header_block), body, url, tag_line])
+        return '\n\n'.join(['\n'.join(lines), url, tag_line])
 
-    # --- 段階的に情報量を落として文字数に収める（性癖系ジャンルタグ・出演者タグを最後まで残す） ---
+    # --- 段階的に情報量を落として文字数に収める ---
     title_limit = 35
     base_tags = hashtags
-    include_price = True
     actor_limit = 3
     genre_limit = 3
+    include_overview = True
 
-    # まずは一言コメントありで試し、収まらなければ外す（bot感対策の要素は最初に削る）
-    text = assemble(hook, base_tags, title_limit, include_price, actor_limit, genre_limit, allow_postscript=True)
-    if x_text_length(text) > char_limit:
-        text = assemble(hook, base_tags, title_limit, include_price, actor_limit, genre_limit, allow_postscript=False)
+    text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
 
     if x_text_length(text) > char_limit:
-        # 1) おすすめポイント(hook)を切り詰める
+        # 1) 概要を切り詰める
         over = x_text_length(text) - char_limit
-        hook = truncate_to_weighted_length(hook, max(10, x_text_length(hook) - over))
-        text = assemble(hook, base_tags, title_limit, include_price, actor_limit, genre_limit)
+        overview = truncate_to_weighted_length(overview, max(10, x_text_length(overview) - over))
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
 
     if x_text_length(text) > char_limit:
-        # 2) 汎用ハッシュタグを最小限（#PR のみ・広告表記として必須）にする
-        #    ジャンル・性癖系タグ（🏷）はこの段階では削らない
+        # 2) 汎用ハッシュタグを最小限（#PR・#FANZAのみ）にする
         base_tags = minimal_disclosure_tags
-        text = assemble(hook, base_tags, title_limit, include_price, actor_limit, genre_limit)
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
 
     if x_text_length(text) > char_limit:
-        # 3) タイトルの表示文字数を縮める
+        # 3) 概要を丸ごと外す
+        include_overview = False
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
+
+    if x_text_length(text) > char_limit:
+        # 4) タイトルの表示文字数を縮める
         title_limit = 20
-        text = assemble(hook, base_tags, title_limit, include_price, actor_limit, genre_limit)
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
 
     if x_text_length(text) > char_limit:
-        # 4) おすすめポイントを丸ごと外す
-        text = assemble('', base_tags, title_limit, include_price, actor_limit, genre_limit)
-        hook = ''
-
-    if x_text_length(text) > char_limit:
-        # 5) 価格表示を外す
-        include_price = False
-        text = assemble(hook, base_tags, title_limit, include_price, actor_limit, genre_limit)
-
-    if x_text_length(text) > char_limit:
-        # 6) 出演者タグを2名→1名に絞る（できる限り残す）
+        # 5) 出演者タグを3名→1名に絞る
         actor_limit = 1
-        text = assemble(hook, base_tags, title_limit, include_price, actor_limit, genre_limit)
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
 
     if x_text_length(text) > char_limit:
-        # 7) ジャンル・性癖系タグを3件→1件に絞る（それでも1件は必ず残す）
+        # 6) ジャンル・性癖系タグを3件→1件に絞る
         genre_limit = 1
-        text = assemble(hook, base_tags, title_limit, include_price, actor_limit, genre_limit)
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
 
     if x_text_length(text) > char_limit:
-        # 8) 最終手段：見出し・タイトル部分だけを切り詰める
-        #    （URL・出演者タグ・ジャンル/性癖タグ・#PR表記は必ず残す）
-        actors = product['actors'][:actor_limit] if actor_limit else []
-        act_tags = actor_tags(actors)
-        genres = prioritize_genres(filter_hashtag_genres(product['genres']))[:genre_limit] if genre_limit else []
-        g_line = genre_tag_line(genres)
-        tag_line = dedupe_hashtag_line('　'.join(t for t in [g_line, base_tags] if t))
-        tail_parts = ['']
-        if act_tags:
-            tail_parts.append(f"{actor_emoji} {act_tags}")
-        tail_parts += ['', url, '', tag_line]
-        tail = '\n'.join(tail_parts)
-        head_budget = char_limit - x_text_length(tail)
-        head = f"{header}\n{title_line(title_limit)}\n\n{cta}"
-        head = truncate_to_weighted_length(head, max(10, head_budget))
-        text = head + tail
+        # 7) 最終手段：タイトルの表示文字数をさらに縮める
+        over = x_text_length(text) - char_limit
+        title_limit = max(5, title_limit - over)
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
 
     assert x_text_length(text) <= char_limit, (
         f"⚠️ 投稿文字数超過: {x_text_length(text)} > {char_limit}\n{text}"
     )
 
-    # ----------------------------------------------------------------
-    # 🧵 スレッド分割（本文にはURLを含めず、リプライ側にURL＋タグをまとめる）
-    #    Xは本文に外部リンクが含まれる投稿の表示を抑制する傾向があるとされるため、
-    #    「1件目＝動画＋文言のみ」「2件目（リプライ）＝URL＋タグ」に分けて投稿する。
-    #    post_text自体は従来通り（プレビュー・履歴保存用）のフル文言のまま返す。
-    # ----------------------------------------------------------------
-    if url in text:
-        idx = text.index(url)
-        thread_main = text[:idx].rstrip('\n')
-        thread_reply = text[idx:].lstrip('\n')
-    else:
-        thread_main = text
-        thread_reply = ''
-
-    # FANZA TV（DMMプレミアム）の併用訴求を一定確率でリプライに追加
-    # （リプライ側の文字数だけで判定。280文字を超える場合は追加しない）
-    if FANZA_TV_AFFILIATE_URL and thread_reply and random.random() < FANZA_TV_PROMO_RATE:
-        promo_block = f"\n\n{random.choice(FANZA_TV_PROMO_LINES)}\n{clean_url(FANZA_TV_AFFILIATE_URL)}"
-        candidate_reply = thread_reply + promo_block
-        if x_text_length(candidate_reply) <= char_limit:
-            thread_reply = candidate_reply
-
-    product['_thread_main'] = thread_main
-    product['_thread_reply'] = thread_reply
+    # 今回は1ツイートで完結するため、スレッド分割は行わない（reply側は空）
+    product['_thread_main'] = text
+    product['_thread_reply'] = ''
 
     return text
 
