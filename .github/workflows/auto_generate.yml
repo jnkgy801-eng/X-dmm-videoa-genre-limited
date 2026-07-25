@@ -54,9 +54,9 @@ on:
         default: true
         type: boolean
       x_post_limit:
-        description: '1回の実行で自動投稿する件数（適正化後は1〜2件を推奨）'
+        description: '1回の実行で自動投稿する件数（デフォルト: 1日1回20:00に10件投稿）'
         required: false
-        default: '2'
+        default: '10'
         type: string
       dmm_article:
         description: 'ジャンル絞り込み種別（genre=ジャンル指定 / actress=女優指定 等。空欄で絞り込みなし）'
@@ -74,13 +74,10 @@ on:
         default: '10'
         type: string
 
-  # 適正化: 1日30件（4時間毎×5件）のような機械的ペースを避け、
-  # 1日2回・1回2件（合計1日4件程度）の、人が運用しているような自然な頻度に変更。
-  # 時刻も「毎時ちょうど」を避け、53分・17分という半端な時刻のままにして
-  # Bot的な規則性を目立たせないようにしている。
+  # 1日1回・日本時間20:00に10件まとめて投稿するペースに変更。
+  # cron はUTC基準のため、JST 20:00 = UTC 11:00 で指定している。
   schedule:
-    - cron: '17 * * * *'   # 日本時間 朝11:17頃
-    - cron: '53 * * * *'   # 日本時間 夜18:53頃
+    - cron: '0 11 * * *'   # 日本時間 20:00頃
 
 jobs:
   generate-posts:
@@ -124,7 +121,7 @@ jobs:
           MIN_PROCESS_COUNT:    ${{ github.event.inputs.min_process_count || '10' }}
           SAVE_TO_REPO:         'true'
           AUTO_POST_TO_X:       ${{ github.event.inputs.auto_post_to_x || 'true' }}
-          X_POST_LIMIT:         ${{ github.event.inputs.x_post_limit || '2' }}
+          X_POST_LIMIT:         ${{ github.event.inputs.x_post_limit || '10' }}
           # 【シャドウバン対策】サンプル動画の冒頭を数秒だけ切り出して投稿する機能。
           # ENABLE_VIDEO_CLIP=false にすると、従来どおりサンプル動画をフル添付する動作に戻せる。
           # 【地域制限のため既定でOFF】DMMのサンプル動画CDNは日本国内IP以外からの
