@@ -188,6 +188,33 @@ else:
     print('💰 価格フィルター: なし（すべての価格を対象）')
 
 # ----------------------------------------------------------------
+# 📅 配信日フィルター（DMM ItemList APIの gte_date / lte_date）
+#    未来配信日（予約商品・販売開始前）の商品は、これまでPython側の
+#    is_future_release() で取得後に破棄していたが、DMM API自体に
+#    gte_date/lte_dateパラメータがあるため、API側で先に絞り込める。
+#    無駄な取得→破棄が減り、MIN_PROCESS_COUNT達成までのAPI呼び出し回数
+#    （＝レート制限消費）を抑えられる。
+#
+#    DMM_GTE_DATE / DMM_LTE_DATE: 'YYYY-MM-DD'形式で明示指定（未指定なら無効）。
+#    AUTO_LTE_DATE_TODAY=true（デフォルト）: DMM_LTE_DATE未指定かつ
+#      新着順（sort=date）で開始位置も未指定（＝最新から検索）の場合に限り、
+#      自動で lte_date=今日 を設定する。ランク順取得や開始位置を明示した
+#      検索では、意図的に過去へ遡っている可能性があるため自動設定しない。
+#    ※ API側の絞り込みに加えて、is_future_release() によるPython側の
+#      二重チェックはそのまま残す（APIの日付解釈のズレに対する保険）。
+# ----------------------------------------------------------------
+DMM_GTE_DATE = os.environ.get('DMM_GTE_DATE', '').strip()
+DMM_LTE_DATE = os.environ.get('DMM_LTE_DATE', '').strip()
+AUTO_LTE_DATE_TODAY = os.environ.get('AUTO_LTE_DATE_TODAY', 'true').strip().lower() not in ('false', '0', 'no')
+
+if DMM_GTE_DATE:
+    print(f'📅 配信日フィルター(以降): {DMM_GTE_DATE} 〜')
+if DMM_LTE_DATE:
+    print(f'📅 配信日フィルター(以前): 〜 {DMM_LTE_DATE}')
+elif AUTO_LTE_DATE_TODAY:
+    print('📅 配信日フィルター(以前): 新着順・開始位置未指定の場合のみ自動で「〜今日」を適用')
+
+# ----------------------------------------------------------------
 # 🚫 見放題（月額サブスク）ch対象作品の除外設定
 #    単品購入向けの投稿に、見放題ch（見放題chデラックス/4K/見放題ch/VR等）の
 #    対象作品が混ざると「単品で買ったのに見放題対象だった」という不満や、
@@ -568,10 +595,19 @@ def check_url(url, timeout=8):
 # 🔧 DMM API 関数
 # ================================================================
 
-def fetch_dmm_products(sort_key, sort_label, offset=None, hits=None):
+def fetch_dmm_products(sort_key, sort_label, offset=None, hits=None, gte_date=None, lte_date=None):
     service, floor_name = FLOOR_SERVICE_MAP.get(DMM_FLOOR, ('digital', 'videoa'))
     _offset = offset if offset is not None else DMM_OFFSET
     _hits   = hits   if hits   is not None else DMM_HITS
+
+    # 引数で明示指定が無ければモジュール設定（環境変数）にフォールバック。
+    _gte_date = gte_date if gte_date is not None else DMM_GTE_DATE
+    _lte_date = lte_date if lte_date is not None else DMM_LTE_DATE
+    # 新着順・開始位置未指定（＝最新から検索）の場合のみ、未指定ならlte_date=今日を自動適用。
+    # ランク順や開始位置を明示した検索では、意図的に過去日を含めたい可能性があるため自動設定しない。
+    if not _lte_date and AUTO_LTE_DATE_TODAY and sort_key == 'date' and not POST_START_INDEX_EXPLICIT:
+        _lte_date = datetime.datetime.now().strftime('%Y-%m-%d')
+
     params = {
         'api_id':       DMM_API_ID,
         'affiliate_id': DMM_AFFILIATE_ID,
@@ -583,12 +619,19 @@ def fetch_dmm_products(sort_key, sort_label, offset=None, hits=None):
         'sort':         sort_key,
         'output':       'json',
     }
+    if _gte_date:
+        params['gte_date'] = _gte_date
+    if _lte_date:
+        params['lte_date'] = _lte_date
     if GENRE_FILTER_ENABLED:
         params['article']    = DMM_ARTICLE
         params['article_id'] = DMM_ARTICLE_ID
 
     genre_label = f' / ジャンル特化: {DMM_ARTICLE}={DMM_ARTICLE_ID}' if GENRE_FILTER_ENABLED else ''
-    print(f'\n  [{sort_label}] 取得範囲: {_offset}件目〜{_offset + _hits - 1}件目{genre_label}')
+    date_label = ''
+    if _gte_date or _lte_date:
+        date_label = f' / 配信日: {_gte_date or "指定なし"} 〜 {_lte_date or "指定なし"}'
+    print(f'\n  [{sort_label}] 取得範囲: {_offset}件目〜{_offset + _hits - 1}件目{genre_label}{date_label}')
 
     for attempt in range(1, DMM_MAX_RETRIES + 1):
         try:
