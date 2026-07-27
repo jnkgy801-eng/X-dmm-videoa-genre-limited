@@ -188,6 +188,40 @@ else:
     print('💰 価格フィルター: なし（すべての価格を対象）')
 
 # ----------------------------------------------------------------
+# 🚫 見放題（月額サブスク）ch対象作品の除外設定
+#    単品購入向けの投稿に、見放題ch（見放題chデラックス/4K/見放題ch/VR等）の
+#    対象作品が混ざると「単品で買ったのに見放題対象だった」という不満や、
+#    そもそも単品購入の報酬が発生しにくい（見放題会員は追加課金しないため）
+#    ミスマッチが起きるため、見放題ch対象のCIDを持つ作品は投稿候補から除外する。
+#
+#    判定は CPCOM/isMonthly リポジトリが公開しているCID一覧
+#    （raw.githubusercontent.com上の.txt。1行1CID）と、DMM APIから取得した
+#    content_id を突き合わせることで行う。
+#
+#    EXCLUDE_MONTHLY_UNLIMITED=false にすると従来どおり除外なしで動作する（デフォルトは有効=true）。
+#    MONTHLY_UNLIMITED_URLS でカンマ区切りの参照リストを上書き可能
+#    （未設定時はFANZA系の見放題ch4種：PREMIUM/PREMIUM_4K/STANDARD/VR）。
+# ----------------------------------------------------------------
+EXCLUDE_MONTHLY_UNLIMITED = os.environ.get('EXCLUDE_MONTHLY_UNLIMITED', 'true').strip().lower() not in ('false', '0', 'no')
+
+DEFAULT_MONTHLY_UNLIMITED_URLS = [
+    'https://raw.githubusercontent.com/CPCOM/isMonthly/main/Fanza/PREMIUM.txt',
+    'https://raw.githubusercontent.com/CPCOM/isMonthly/main/Fanza/PREMIUM_4K.txt',
+    'https://raw.githubusercontent.com/CPCOM/isMonthly/main/Fanza/STANDARD.txt',
+    'https://raw.githubusercontent.com/CPCOM/isMonthly/main/Fanza/VR.txt',
+]
+_monthly_urls_env = os.environ.get('MONTHLY_UNLIMITED_URLS', '').strip()
+MONTHLY_UNLIMITED_URLS = (
+    [u.strip() for u in _monthly_urls_env.split(',') if u.strip()]
+    if _monthly_urls_env else DEFAULT_MONTHLY_UNLIMITED_URLS
+)
+
+if EXCLUDE_MONTHLY_UNLIMITED:
+    print(f'🚫 見放題ch対象作品の除外: 有効（参照リスト {len(MONTHLY_UNLIMITED_URLS)}件）')
+else:
+    print('🚫 見放題ch対象作品の除外: 無効（見放題対象作品も投稿候補に含めます）')
+
+# ----------------------------------------------------------------
 # 📺 FANZA TV（DMMプレミアム）併用訴求設定
 #    単品作品だけでなく、月額見放題サービスも一緒に紹介すると成約率が上がりやすいとされるため、
 #    設定時は一定確率でリプライ欄に併用訴求を追加する（サービス新規報酬の獲得を狙う）。
@@ -762,6 +796,50 @@ def price_in_range(product):
     if price_max is not None and price_num > price_max:
         return False
     return True
+
+
+_MONTHLY_UNLIMITED_CIDS = None  # 一度取得したら使い回すキャッシュ（Noneは未取得、set()は取得済み＝空でもOK）
+
+
+def load_monthly_unlimited_cids():
+    """CPCOM/isMonthlyが公開する見放題ch対象CID一覧をまとめて取得し、集合として返す。
+    結果はモジュール内でキャッシュし、実行中に何度呼ばれても取得は初回の1回だけにする。
+    一部のリスト取得に失敗しても処理は止めず、取得できた分だけで判定を継続する
+    （全滅した場合は空集合になり、実質「除外なし」と同じ挙動にフォールバックする）。"""
+    global _MONTHLY_UNLIMITED_CIDS
+    if _MONTHLY_UNLIMITED_CIDS is not None:
+        return _MONTHLY_UNLIMITED_CIDS
+
+    cids = set()
+    if not EXCLUDE_MONTHLY_UNLIMITED:
+        _MONTHLY_UNLIMITED_CIDS = cids
+        return cids
+
+    print('🚫 見放題ch対象CID一覧を取得中...')
+    for url in MONTHLY_UNLIMITED_URLS:
+        try:
+            resp = requests.get(url, timeout=15)
+            resp.raise_for_status()
+            lines = [line.strip().lower() for line in resp.text.splitlines() if line.strip()]
+            cids.update(lines)
+            print(f'  📥 取得成功: {url}（{len(lines):,}件）')
+        except Exception as e:
+            print(f'  ⚠️  取得失敗（このリストの判定はスキップして続行）: {url} ({e})')
+
+    print(f'🚫 見放題ch対象CID 合計: {len(cids):,}件')
+    _MONTHLY_UNLIMITED_CIDS = cids
+    return cids
+
+
+def is_monthly_unlimited(product):
+    """商品が見放題ch（月額サブスク）対象作品かどうかを判定する。
+    content_id（品番）が isMonthly のCID一覧に含まれていればTrue。"""
+    if not EXCLUDE_MONTHLY_UNLIMITED:
+        return False
+    content_id = (product.get('content_id') or '').strip().lower()
+    if not content_id:
+        return False
+    return content_id in load_monthly_unlimited_cids()
 
 
 # ----------------------------------------------------------------
@@ -1558,6 +1636,9 @@ print(f'🛍️  DMMから商品情報を取得中（フロア: {DMM_FLOOR} / �
 
 POSTED_HISTORY = load_posted_history()
 print(f'📚 過去に生成済みの品番: {len(POSTED_HISTORY)}件（重複はスキップします）')
+
+if EXCLUDE_MONTHLY_UNLIMITED:
+    load_monthly_unlimited_cids()  # ループ内で毎回取得しないよう、ここで先に1回だけ取得しておく
 generated_ids = set()  # このランでテキスト生成の対象になった品番（AUTO_POST_TO_X=false時の重複防止用）
 
 all_sections = []
@@ -1617,6 +1698,9 @@ for sort_key, sort_label in SORT_LIST:
                 print(f"    ⏭ 過去に生成済みのためスキップ: [{p['content_id']}] {p['title'][:30]}")
                 continue
             if PRICE_RANGE_BOUNDS and not price_in_range(p):
+                continue
+            if is_monthly_unlimited(p):
+                print(f"    ⏭ 見放題ch対象のためスキップ: [{p.get('content_id','')}] {p['title'][:30]}")
                 continue
             # 配信日が実行時点より未来（予約商品・販売開始前）の場合はまだ投稿しない
             if is_future_release(p):
