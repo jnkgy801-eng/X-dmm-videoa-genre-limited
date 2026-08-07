@@ -439,6 +439,16 @@ COPY_TEMPLATES = [
     "無料サンプルの時点で期待値がかなり上がった。本編まで見て裏切られなかったやつ",
     "レビューが伸びてる作品は当たりの確率が体感で全然違う。今回はまさにそのパターン",
     "サンプルだけ見て判断つかない人向けに言うと、本編は最初の展開がさらに続くタイプ",
+
+    # 【v10追加】問いかけ型：読者に自分事として考えさせ、リプライやいいねを誘発する
+    "こういう展開が好きな人、この作品は絶対チェックしといたほうがいい",
+    "サムネだけで気になった人いる？中身も普通にその期待を超えてくるタイプだった",
+    "こういうシチュエーション好きな人にしか刺さらないと思うけど、刺さる人には刺さりすぎる内容",
+
+    # 【v10追加】警告・注意喚起型：「気づかず損する」パターンを先回りで指摘し、読み飛ばしを防ぐ
+    "サムネだけで判断すると普通に損する。中身の作り込みがそのレベルじゃない",
+    "タイトルだけ見て後回しにしがちだけど、これは後回しにすると普通に後悔するやつ",
+    "パッと見の印象で判断してスルーするにはもったいない出来だった",
 ]
 
 # 【NTR特化】DMM_ARTICLE_IDがNTRジャンルの場合に通常のCOPY_TEMPLATESへ追加する専用コピー。
@@ -764,18 +774,6 @@ def is_future_release(product):
         return False
 
 
-def is_recent_release(product, days=3):
-    """配信日が直近days日以内かどうかを判定する（実データに基づく『なぜ今か』の根拠に使う）。
-    架空のセール期限などは訴求せず、確実に真実である『新着』のみを鮮度訴求の材料にする。"""
-    date_str = (product.get('date') or '')[:10]
-    if not date_str:
-        return False
-    try:
-        dt = datetime.datetime.strptime(date_str, '%Y-%m-%d')
-        return (datetime.datetime.now() - dt).days <= days
-    except ValueError:
-        return False
-
 def clean_url(url):
     if not url:
         return ''
@@ -963,10 +961,25 @@ def build_x_single_post(product, char_limit=280):
     product['sample_check'] = check_url(sample_full) if (sample_full and ENABLE_URL_CHECK) else None
 
     title = product['title']
+    review_avg = product.get('review_avg')
+    review_count = product.get('review_count')
 
     def title_line(limit):
         t = (title[:limit] + '…') if len(title) > limit else title
         return f"📽 {t}"
+
+    # 【フック強化】レビュー件数・評価があれば、タイトルより前に置く一言フックを作る。
+    # 実データに基づく具体的な数字は「読者が目を止める」効果が高いため優先的に使う。
+    HOOK_EMOJIS = ['👀', '🔥', '📈']
+
+    def hook_line():
+        if review_avg and review_count:
+            e = random.choice(HOOK_EMOJIS)
+            return f"{e} レビュー{review_count}件で評価{review_avg:.1f}"
+        if review_count:
+            e = random.choice(HOOK_EMOJIS)
+            return f"{e} レビュー{review_count}件の話題作"
+        return None
 
     def genre_tag_line(genre_limit):
         genres = prioritize_genres(filter_hashtag_genres(product['genres']))[:genre_limit] if genre_limit else []
@@ -983,9 +996,9 @@ def build_x_single_post(product, char_limit=280):
     # NTR作品の概要（NTR系ジャンルの場合はNTR特化の概要テンプレ、それ以外は汎用テンプレ）
     overview = random.choice(NTR_COPY_TEMPLATES if IS_NTR_FOCUSED else COPY_TEMPLATES)
 
-    # 【bot感対策】毎回同じ絵文字にならないようランダムに選ぶ
-    PRICE_EMOJIS = ['💰', '🪙']
-    ACTOR_EMOJIS = ['👤', '🎭']
+    # 【bot感対策】毎回同じ絵文字にならないようランダムに選ぶ（候補数を増やしてパターンを分散）
+    PRICE_EMOJIS = ['💰', '🪙', '🏷️']
+    ACTOR_EMOJIS = ['👤', '🎭', '⭐']
     price_emoji = random.choice(PRICE_EMOJIS)
     actor_emoji = random.choice(ACTOR_EMOJIS)
 
@@ -993,10 +1006,15 @@ def build_x_single_post(product, char_limit=280):
         return f"{price_emoji} {product['price']}" if product.get('price') else None
 
     def assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview_text):
+        """本文（URLなし）を組み立てる。URLはXの表示抑制対策のためリプライ側に回す。"""
         actors = product['actors'][:actor_limit] if actor_limit else []
         act_tags = actor_tags(actors)
 
-        lines = [title_line(title_limit)]
+        lines = []
+        h_line = hook_line()
+        if h_line:
+            lines.append(h_line)
+        lines.append(title_line(title_limit))
         if include_overview and overview_text:
             lines.append(f"📝 {overview_text}")
         p_line = price_line()
@@ -1005,12 +1023,18 @@ def build_x_single_post(product, char_limit=280):
         if act_tags:
             lines.append(f"{actor_emoji} {act_tags}")
 
+        return '\n'.join(lines)
+
+    def assemble_reply(genre_limit, base_tags):
+        """リプライ（2件目）を組み立てる：アフィリエイトURL＋ハッシュタグ。"""
         g_line = genre_tag_line(genre_limit)
         tag_line = dedupe_hashtag_line('　'.join(t for t in [g_line, base_tags] if t))
+        return '\n\n'.join([url, tag_line])
 
-        return '\n\n'.join(['\n'.join(lines), url, tag_line])
-
-    # --- 段階的に情報量を落として文字数に収める ---
+    # --- 段階的に情報量を落として本文の文字数に収める ---
+    # 【重要】文字数の上限判定はスレッド1件目（本文）単体に対して行う。
+    #    URLとハッシュタグはリプライ（2件目）に分離しているため、本文側の
+    #    char_limitはX投稿の上限（280文字）をそのまま使ってよい。
     title_limit = 35
     base_tags = hashtags
     actor_limit = 3
@@ -1026,7 +1050,7 @@ def build_x_single_post(product, char_limit=280):
         text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
 
     if x_text_length(text) > char_limit:
-        # 2) 汎用ハッシュタグを最小限（#FANZAのみ）にする
+        # 2) 汎用ハッシュタグを最小限（#FANZAのみ）にする（※リプライ側のタグに影響）
         base_tags = minimal_disclosure_tags
         text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
 
@@ -1046,7 +1070,7 @@ def build_x_single_post(product, char_limit=280):
         text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
 
     if x_text_length(text) > char_limit:
-        # 6) ジャンル・性癖系タグを3件→1件に絞る
+        # 6) ジャンル・性癖系タグを3件→1件に絞る（※リプライ側のタグに影響）
         genre_limit = 1
         text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
 
@@ -1060,11 +1084,18 @@ def build_x_single_post(product, char_limit=280):
         f"⚠️ 投稿文字数超過: {x_text_length(text)} > {char_limit}\n{text}"
     )
 
-    # 今回は1ツイートで完結するため、スレッド分割は行わない（reply側は空）
-    product['_thread_main'] = text
-    product['_thread_reply'] = ''
+    reply_text = assemble_reply(genre_limit, base_tags)
+    # リプライも一応X上限内に収める（通常は本文よりずっと短いので超過はまず起きない想定）
+    if x_text_length(reply_text) > char_limit:
+        reply_text = truncate_to_weighted_length(reply_text, char_limit)
 
-    return text
+    # 本文（URLなし）とリプライ（URL＋タグ）の2ツイートに分割する。
+    product['_thread_main'] = text
+    product['_thread_reply'] = reply_text
+
+    # save_posts等でのプレビュー表示・文字数集計用に、本文＋リプライを結合した全体像も返す。
+    # （実際にBufferへ投稿されるのは_thread_main/_thread_replyの方）
+    return '\n\n'.join([text, reply_text])
 
 
 # ================================================================
