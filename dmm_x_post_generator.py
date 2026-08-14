@@ -135,27 +135,6 @@ DMM_RETRY_WAIT_SEC = float(os.environ.get('DMM_RETRY_WAIT_SEC', '3'))
 # ----------------------------------------------------------------
 DMM_PRICE_RANGE = os.environ.get('DMM_PRICE_RANGE', 'all').strip().lower()
 
-# ----------------------------------------------------------------
-# 🎯 ジャンル特化フィルター（DMM ItemList APIのarticle/article_id）
-#    DMM_ARTICLE     : 絞り込み種別。例 "genre"（ジャンル）"actress"（女優）"director"（監督）"series"（シリーズ）"maker"（メーカー）
-#    DMM_ARTICLE_ID   : 上記種別に対応するID（1件のみ。DMM APIの GenreSearch/ActressSearch 等で事前に調べる）
-#    どちらか一方でも空欄なら絞り込みなし（従来どおり全ジャンルを対象にする）。
-# ----------------------------------------------------------------
-DMM_ARTICLE    = os.environ.get('DMM_ARTICLE', '').strip().lower()
-DMM_ARTICLE_ID = os.environ.get('DMM_ARTICLE_ID', '').strip()
-GENRE_FILTER_ENABLED = bool(DMM_ARTICLE and DMM_ARTICLE_ID)
-if GENRE_FILTER_ENABLED:
-    print(f'🎯 ジャンル特化フィルター: 有効（article={DMM_ARTICLE} / article_id={DMM_ARTICLE_ID}）')
-else:
-    print('🎯 ジャンル特化フィルター: なし（全ジャンル対象）')
-
-# NTR（寝取り・寝取られ）ジャンル特化時は、投稿文の煽り文・見出しをNTR向けの
-# 訴求内容に寄せる。DMM_ARTICLE_IDでジャンルを判定する（genresearch.py参照）。
-NTR_GENRE_IDS = {'4111'}
-IS_NTR_FOCUSED = (
-    GENRE_FILTER_ENABLED and DMM_ARTICLE == 'genre' and DMM_ARTICLE_ID in NTR_GENRE_IDS
-)
-
 def parse_price_range(range_str):
     """価格範囲文字列を (min, max) のタプルに変換する。max=Noneは上限なし。"""
     if not range_str or range_str == 'all':
@@ -188,65 +167,17 @@ else:
     print('💰 価格フィルター: なし（すべての価格を対象）')
 
 # ----------------------------------------------------------------
-# 📅 配信日フィルター（DMM ItemList APIの gte_date / lte_date）
-#    未来配信日（予約商品・販売開始前）の商品は、これまでPython側の
-#    is_future_release() で取得後に破棄していたが、DMM API自体に
-#    gte_date/lte_dateパラメータがあるため、API側で先に絞り込める。
-#    無駄な取得→破棄が減り、MIN_PROCESS_COUNT達成までのAPI呼び出し回数
-#    （＝レート制限消費）を抑えられる。
-#
-#    DMM_GTE_DATE / DMM_LTE_DATE: 'YYYY-MM-DD'形式で明示指定（未指定なら無効）。
-#    AUTO_LTE_DATE_TODAY=true（デフォルト）: DMM_LTE_DATE未指定かつ
-#      新着順（sort=date）で開始位置も未指定（＝最新から検索）の場合に限り、
-#      自動で lte_date=今日 を設定する。ランク順取得や開始位置を明示した
-#      検索では、意図的に過去へ遡っている可能性があるため自動設定しない。
-#    ※ API側の絞り込みに加えて、is_future_release() によるPython側の
-#      二重チェックはそのまま残す（APIの日付解釈のズレに対する保険）。
+# 🔍 ジャンル/女優等の絞り込み設定（DMM API の article / article_id パラメータ）
+#    DMM_ARTICLE    : 絞り込み種別（例: genre / actress / series / maker）
+#    DMM_ARTICLE_ID : 絞り込みID（DMM APIのジャンル一覧・女優一覧等から取得したID。1件のみ指定可）
+#    どちらか一方でも空欄の場合は絞り込みを行わない（従来どおり全ジャンル対象）。
 # ----------------------------------------------------------------
-DMM_GTE_DATE = os.environ.get('DMM_GTE_DATE', '').strip()
-DMM_LTE_DATE = os.environ.get('DMM_LTE_DATE', '').strip()
-AUTO_LTE_DATE_TODAY = os.environ.get('AUTO_LTE_DATE_TODAY', 'true').strip().lower() not in ('false', '0', 'no')
-
-if DMM_GTE_DATE:
-    print(f'📅 配信日フィルター(以降): {DMM_GTE_DATE} 〜')
-if DMM_LTE_DATE:
-    print(f'📅 配信日フィルター(以前): 〜 {DMM_LTE_DATE}')
-elif AUTO_LTE_DATE_TODAY:
-    print('📅 配信日フィルター(以前): 新着順・開始位置未指定の場合のみ自動で「〜今日」を適用')
-
-# ----------------------------------------------------------------
-# 🚫 見放題（月額サブスク）ch対象作品の除外設定
-#    単品購入向けの投稿に、見放題ch（見放題chデラックス/4K/見放題ch/VR等）の
-#    対象作品が混ざると「単品で買ったのに見放題対象だった」という不満や、
-#    そもそも単品購入の報酬が発生しにくい（見放題会員は追加課金しないため）
-#    ミスマッチが起きるため、見放題ch対象のCIDを持つ作品は投稿候補から除外する。
-#
-#    判定は CPCOM/isMonthly リポジトリが公開しているCID一覧
-#    （raw.githubusercontent.com上の.txt。1行1CID）と、DMM APIから取得した
-#    content_id を突き合わせることで行う。
-#
-#    EXCLUDE_MONTHLY_UNLIMITED=false にすると従来どおり除外なしで動作する（デフォルトは有効=true）。
-#    MONTHLY_UNLIMITED_URLS でカンマ区切りの参照リストを上書き可能
-#    （未設定時はFANZA系の見放題ch4種：PREMIUM/PREMIUM_4K/STANDARD/VR）。
-# ----------------------------------------------------------------
-EXCLUDE_MONTHLY_UNLIMITED = os.environ.get('EXCLUDE_MONTHLY_UNLIMITED', 'true').strip().lower() not in ('false', '0', 'no')
-
-DEFAULT_MONTHLY_UNLIMITED_URLS = [
-    'https://raw.githubusercontent.com/CPCOM/isMonthly/main/Fanza/PREMIUM.txt',
-    'https://raw.githubusercontent.com/CPCOM/isMonthly/main/Fanza/PREMIUM_4K.txt',
-    'https://raw.githubusercontent.com/CPCOM/isMonthly/main/Fanza/STANDARD.txt',
-    'https://raw.githubusercontent.com/CPCOM/isMonthly/main/Fanza/VR.txt',
-]
-_monthly_urls_env = os.environ.get('MONTHLY_UNLIMITED_URLS', '').strip()
-MONTHLY_UNLIMITED_URLS = (
-    [u.strip() for u in _monthly_urls_env.split(',') if u.strip()]
-    if _monthly_urls_env else DEFAULT_MONTHLY_UNLIMITED_URLS
-)
-
-if EXCLUDE_MONTHLY_UNLIMITED:
-    print(f'🚫 見放題ch対象作品の除外: 有効（参照リスト {len(MONTHLY_UNLIMITED_URLS)}件）')
+DMM_ARTICLE    = os.environ.get('DMM_ARTICLE', '').strip()
+DMM_ARTICLE_ID = os.environ.get('DMM_ARTICLE_ID', '').strip()
+if DMM_ARTICLE and DMM_ARTICLE_ID:
+    print(f'🔍 ジャンル絞り込み: article={DMM_ARTICLE} / article_id={DMM_ARTICLE_ID}')
 else:
-    print('🚫 見放題ch対象作品の除外: 無効（見放題対象作品も投稿候補に含めます）')
+    print('🔍 ジャンル絞り込み: なし（すべてのジャンルを対象）')
 
 # ----------------------------------------------------------------
 # 📺 FANZA TV（DMMプレミアム）併用訴求設定
@@ -351,11 +282,11 @@ HASHTAG_MAP = {
     # 一般エンタメ・動画系タグで間口を広げ、FANZA未登録層にアプローチ
     'videoa': '#アダルト動画 #FANZA ',
     'videoc': '#素人動画 #FANZA #個人撮影 ',
-    'anime':  '#エロアニメ #FANZA #アニメ好き ',
-    'doujin': '#同人誌 #FANZA #エロ同人 ',
-    'comic':  '#エロ漫画 #FANZA #電子書籍 ',
-    'goods':  '#大人グッズ #FANZA ',
-    'default': '#FANZA #アダルト動画 ',
+    'anime':  '#エロアニメ #FANZA #アニメ好き #PR',
+    'doujin': '#同人誌 #FANZA #エロ同人 #PR',
+    'comic':  '#エロ漫画 #FANZA #電子書籍 #PR',
+    'goods':  '#大人グッズ #FANZA #PR',
+    'default': '#FANZA #アダルト動画 #PR',
 }
 
 # ジャンル別の追加ハッシュタグ（genre_tagsで使うジャンル名に加えて付与する）
@@ -439,33 +370,6 @@ COPY_TEMPLATES = [
     "無料サンプルの時点で期待値がかなり上がった。本編まで見て裏切られなかったやつ",
     "レビューが伸びてる作品は当たりの確率が体感で全然違う。今回はまさにそのパターン",
     "サンプルだけ見て判断つかない人向けに言うと、本編は最初の展開がさらに続くタイプ",
-
-    # 【v10追加】問いかけ型：読者に自分事として考えさせ、リプライやいいねを誘発する
-    "こういう展開が好きな人、この作品は絶対チェックしといたほうがいい",
-    "サムネだけで気になった人いる？中身も普通にその期待を超えてくるタイプだった",
-    "こういうシチュエーション好きな人にしか刺さらないと思うけど、刺さる人には刺さりすぎる内容",
-
-    # 【v10追加】警告・注意喚起型：「気づかず損する」パターンを先回りで指摘し、読み飛ばしを防ぐ
-    "サムネだけで判断すると普通に損する。中身の作り込みがそのレベルじゃない",
-    "タイトルだけ見て後回しにしがちだけど、これは後回しにすると普通に後悔するやつ",
-    "パッと見の印象で判断してスルーするにはもったいない出来だった",
-]
-
-# 【NTR特化】DMM_ARTICLE_IDがNTRジャンルの場合に通常のCOPY_TEMPLATESへ追加する専用コピー。
-# 「寝取る側／寝取られる側どちらの心理も描けているか」「同意の上での関係性の変化」など、
-# このジャンル特有の“ギャップ・緊張感・背徳感”を訴求軸にする。露骨な性描写ではなく、
-# 作品の見どころ・引き込まれるポイントを言語化する方向で統一。
-NTR_COPY_TEMPLATES = [
-    "寝取られる側の心理描写がちゃんと丁寧なタイプ。ただ寝取るだけの雑な展開じゃないから引き込まれる",
-    "見てる側の嫉妬心を煽ってくる作りが上手い。NTR系は結局この“揺さぶり方”で当たり外れが決まる",
-    "最初は普通の関係だったのが少しずつ崩れていく過程が丁寧。一気に堕ちるタイプより刺さる人多いと思う",
-    "寝取る側の余裕と、気づいていく側の焦りの対比がしっかり描かれてて没入感が違った",
-    "NTRは背徳感の積み上げ方が命だと思ってるけど、これはその積み上げ方がうまい部類",
-    "同じ寝取られ物でも、関係性の説明を端折らないタイプは満足度が高い。今回はまさにそれ",
-    "罪悪感と快楽のバランスが極端じゃなくて、変にリアリティがあるから見入ってしまう",
-    "寝取られ好きに刺さるポイントを分かってる作り。中途半端に匂わせて終わらないタイプ",
-    "この手のジャンルは表情の演技力で差が出ると思ってるけど、そこがちゃんとしてた",
-    "関係が壊れていく“過程”にちゃんと尺を使ってるから、結末までの説得力がある",
 ]
 
 
@@ -576,14 +480,7 @@ def truncate_to_weighted_length(text, max_len):
 
 # ----------------------------------------------------------------
 # 🔗 URL確認
-#    投稿文生成のたびにアフィリエイトURL・サンプル動画URLへHTTPリクエストを送って
-#    生死確認する機能。結果は保存されるテキストファイルの表示（OK/NG）にしか使われず、
-#    投稿するかどうかの判定には影響しない。候補が多いと大量のHTTPリクエストが
-#    直列で走り処理時間が大きく伸びるため、デフォルトは無効（スキップ）にしている。
-#    ENABLE_URL_CHECK=true で有効化できる。
 # ----------------------------------------------------------------
-ENABLE_URL_CHECK = os.environ.get('ENABLE_URL_CHECK', 'false').strip().lower() in ('1', 'true', 'yes')
-
 
 def check_url(url, timeout=8):
     """URLが実際にアクセス可能かHEADリクエストで確認する。結果はTrue/False/None(未確認)。"""
@@ -605,19 +502,10 @@ def check_url(url, timeout=8):
 # 🔧 DMM API 関数
 # ================================================================
 
-def fetch_dmm_products(sort_key, sort_label, offset=None, hits=None, gte_date=None, lte_date=None):
+def fetch_dmm_products(sort_key, sort_label, offset=None, hits=None):
     service, floor_name = FLOOR_SERVICE_MAP.get(DMM_FLOOR, ('digital', 'videoa'))
     _offset = offset if offset is not None else DMM_OFFSET
     _hits   = hits   if hits   is not None else DMM_HITS
-
-    # 引数で明示指定が無ければモジュール設定（環境変数）にフォールバック。
-    _gte_date = gte_date if gte_date is not None else DMM_GTE_DATE
-    _lte_date = lte_date if lte_date is not None else DMM_LTE_DATE
-    # 新着順・開始位置未指定（＝最新から検索）の場合のみ、未指定ならlte_date=今日を自動適用。
-    # ランク順や開始位置を明示した検索では、意図的に過去日を含めたい可能性があるため自動設定しない。
-    if not _lte_date and AUTO_LTE_DATE_TODAY and sort_key == 'date' and not POST_START_INDEX_EXPLICIT:
-        _lte_date = datetime.datetime.now().strftime('%Y-%m-%d')
-
     params = {
         'api_id':       DMM_API_ID,
         'affiliate_id': DMM_AFFILIATE_ID,
@@ -629,19 +517,18 @@ def fetch_dmm_products(sort_key, sort_label, offset=None, hits=None, gte_date=No
         'sort':         sort_key,
         'output':       'json',
     }
-    if _gte_date:
-        params['gte_date'] = _gte_date
-    if _lte_date:
-        params['lte_date'] = _lte_date
-    if GENRE_FILTER_ENABLED:
+    if DMM_ARTICLE and DMM_ARTICLE_ID:
         params['article']    = DMM_ARTICLE
         params['article_id'] = DMM_ARTICLE_ID
-
-    genre_label = f' / ジャンル特化: {DMM_ARTICLE}={DMM_ARTICLE_ID}' if GENRE_FILTER_ENABLED else ''
-    date_label = ''
-    if _gte_date or _lte_date:
-        date_label = f' / 配信日: {_gte_date or "指定なし"} 〜 {_lte_date or "指定なし"}'
-    print(f'\n  [{sort_label}] 取得範囲: {_offset}件目〜{_offset + _hits - 1}件目{genre_label}{date_label}')
+    # 新着順（-date）の取得は「1件目から」ではなく「今日の日付以前（＝配信済み）」の
+    # 作品だけを対象にする。DMM APIのlte_dateで絞り込むことで、
+    # 未来配信（予約中）の作品を取得段階でそもそも除外し、
+    # is_future_releaseによる後からのスキップ（＝APIの取得枠の無駄遣い）を防ぐ。
+    if sort_key == 'date':
+        lte_date = datetime.datetime.now().strftime('%Y-%m-%dT23:59:59')
+        params['lte_date'] = lte_date
+        print(f'  [{sort_label}] 日付フィルター: 〜{lte_date}（今日以前の配信済み作品のみ）')
+    print(f'\n  [{sort_label}] 取得範囲: {_offset}件目〜{_offset + _hits - 1}件目')
 
     for attempt in range(1, DMM_MAX_RETRIES + 1):
         try:
@@ -697,6 +584,7 @@ def parse_product(item):
         if g.get('name', '') not in EXCLUDED_GENRES
     ][:3]
     maker  = ((item.get('iteminfo', {}).get('maker') or [{}])[0]).get('name', '')
+    series = ((item.get('iteminfo', {}).get('series') or [{}])[0]).get('name', '')
 
     sample_movie_url = ''
     smv = item.get('sampleMovieURL', {})
@@ -733,6 +621,7 @@ def parse_product(item):
         'actors':           actors,
         'genres':           genres,
         'maker':            maker,
+        'series':           series,
         'sample_movie_url': sample_movie_url,
         'content_id':       content_id,
         'review_avg':       review_avg,
@@ -773,6 +662,18 @@ def is_future_release(product):
     except ValueError:
         return False
 
+
+def is_recent_release(product, days=3):
+    """配信日が直近days日以内かどうかを判定する（実データに基づく『なぜ今か』の根拠に使う）。
+    架空のセール期限などは訴求せず、確実に真実である『新着』のみを鮮度訴求の材料にする。"""
+    date_str = (product.get('date') or '')[:10]
+    if not date_str:
+        return False
+    try:
+        dt = datetime.datetime.strptime(date_str, '%Y-%m-%d')
+        return (datetime.datetime.now() - dt).days <= days
+    except ValueError:
+        return False
 
 def clean_url(url):
     if not url:
@@ -839,50 +740,6 @@ def price_in_range(product):
     return True
 
 
-_MONTHLY_UNLIMITED_CIDS = None  # 一度取得したら使い回すキャッシュ（Noneは未取得、set()は取得済み＝空でもOK）
-
-
-def load_monthly_unlimited_cids():
-    """CPCOM/isMonthlyが公開する見放題ch対象CID一覧をまとめて取得し、集合として返す。
-    結果はモジュール内でキャッシュし、実行中に何度呼ばれても取得は初回の1回だけにする。
-    一部のリスト取得に失敗しても処理は止めず、取得できた分だけで判定を継続する
-    （全滅した場合は空集合になり、実質「除外なし」と同じ挙動にフォールバックする）。"""
-    global _MONTHLY_UNLIMITED_CIDS
-    if _MONTHLY_UNLIMITED_CIDS is not None:
-        return _MONTHLY_UNLIMITED_CIDS
-
-    cids = set()
-    if not EXCLUDE_MONTHLY_UNLIMITED:
-        _MONTHLY_UNLIMITED_CIDS = cids
-        return cids
-
-    print('🚫 見放題ch対象CID一覧を取得中...')
-    for url in MONTHLY_UNLIMITED_URLS:
-        try:
-            resp = requests.get(url, timeout=15)
-            resp.raise_for_status()
-            lines = [line.strip().lower() for line in resp.text.splitlines() if line.strip()]
-            cids.update(lines)
-            print(f'  📥 取得成功: {url}（{len(lines):,}件）')
-        except Exception as e:
-            print(f'  ⚠️  取得失敗（このリストの判定はスキップして続行）: {url} ({e})')
-
-    print(f'🚫 見放題ch対象CID 合計: {len(cids):,}件')
-    _MONTHLY_UNLIMITED_CIDS = cids
-    return cids
-
-
-def is_monthly_unlimited(product):
-    """商品が見放題ch（月額サブスク）対象作品かどうかを判定する。
-    content_id（品番）が isMonthly のCID一覧に含まれていればTrue。"""
-    if not EXCLUDE_MONTHLY_UNLIMITED:
-        return False
-    content_id = (product.get('content_id') or '').strip().lower()
-    if not content_id:
-        return False
-    return content_id in load_monthly_unlimited_cids()
-
-
 # ----------------------------------------------------------------
 # 📏 X（Twitter）の文字数カウント
 #    旧実装は len(text) をそのまま使っていたが、これはバグだった。
@@ -936,53 +793,99 @@ def x_text_length(text):
     return weighted
 
 
+# ----------------------------------------------------------------
+# 📝 簡易キャッチコピー生成（AI不使用・シリーズ名/ジャンル/メーカー名から機械的に組み立てる）
+#    DMM APIにはあらすじ・概要フィールドが存在しないため、本当の内容紹介ではなく
+#    「シリーズ名」「ジャンル」「メーカー名」といった手持ちのメタ情報から
+#    それっぽい一言を生成する簡易ロジック。無料・API呼び出しなし・処理は一瞬。
+# ----------------------------------------------------------------
+CATCHCOPY_TEMPLATES = [
+    "{info}が気になる一本",
+    "{info}をチェック",
+    "{info}な作品です",
+    "{info}系はこちら",
+    "{info}、思わず二度見した",
+    "{info}好きは見といた方がいい",
+    "{info}、地味に刺さった",
+    "{info}、今日一番気になった作品",
+    "{info}、サムネで止まった",
+    "{info}、これは覚えておきたい",
+]
+
+
+def build_catchcopy(product):
+    """シリーズ名・ジャンル・メーカー名から簡易的な一言キャッチコピーを組み立てる。
+    材料が何もない場合は空文字を返す（その場合は投稿文に含めない）。"""
+    parts = []
+    if product.get('series'):
+        parts.append(f"『{product['series']}』シリーズ")
+
+    genres = filter_hashtag_genres(product.get('genres') or [])
+    if genres:
+        parts.append('×'.join(genres[:2]))
+
+    if not parts and product.get('maker'):
+        parts.append(f"{product['maker']}の新作")
+
+    if not parts:
+        return ''
+
+    info = '　'.join(parts[:2])
+    return random.choice(CATCHCOPY_TEMPLATES).format(info=info)
+
+
 def build_x_single_post(product, char_limit=280):
-    """1ポストで完結する投稿文を「作品名・値段・出演者・アフィリエイトURL・ハッシュタグ・
-    NTR作品の概要」の6要素だけで組み立てる。見出し・CTA・一言コメントは含めない。
+    """投稿文を「作品名・金額・出演者・アフィリエイトURL・ハッシュタグ」＋簡易キャッチコピーの
+    1ツイートで組み立てる。見出し・おすすめポイント（コピー文）・CTA・一言コメント・
+    サンプル動画URLは含めない。
 
     文字数が厳しい場合に削る優先順位（上ほど先に削る）:
-      1. NTR作品の概要（コピー文）
-      2. 汎用ハッシュタグ（#アダルト動画 等）※ 
-      3. タイトルの表示文字数
-      4. 出演者タグを3名→1名に
-      5. ジャンル・性癖系ハッシュタグを1件に
-    金額・出演者最低1名・アフィリエイトURL・#PRは常に含む。
+      1. 簡易キャッチコピー（シリーズ名/ジャンルから機械生成した一言）
+      2. 汎用ハッシュタグ（#アダルト動画 等）※ #PR は広告表記のため必ず残す
+      3. ジャンル・性癖系ハッシュタグ（🏷）を3件→1件→0件に
+      4. 出演者タグを3名→1名→0名に
+      5. 作品名の表示文字数を縮める（最終手段）
+    金額・アフィリエイトURL・#PRは常に含む。
     """
     hashtags = HASHTAG_MAP.get(DMM_FLOOR, HASHTAG_MAP['default'])
-    # 広告表記として必須の #FANZA も必ず残す最小構成
-    minimal_disclosure_tags = '#FANZA '
+    # 広告表記として必須の #PR に加え、#FANZA も必ず残す最小構成
+    minimal_disclosure_tags = '#FANZA #PR'
     url = clean_url(product['affiliate_url'])
-    sample_full = clean_url(product.get('sample_movie_url', ''))
+    title = product['title']
+    catchcopy = build_catchcopy(product)
 
-    url_ok = check_url(url) if (url and ENABLE_URL_CHECK) else None
+    url_ok = check_url(url) if url else None
     if url and url_ok is False:
         print(f"    ⚠️  アフィリエイトURLにアクセスできませんでした: {url}")
     product['url_check'] = url_ok
-    product['sample_check'] = check_url(sample_full) if (sample_full and ENABLE_URL_CHECK) else None
+    product['sample_check'] = None
 
-    title = product['title']
-    review_avg = product.get('review_avg')
-    review_count = product.get('review_count')
+    # 【bot感対策】毎回同じ絵文字にならないようランダムに選ぶ
+    PRICE_EMOJIS = ['💰', '🪙']
+    ACTOR_EMOJIS = ['👤', '🎭']
+    price_emoji = random.choice(PRICE_EMOJIS)
+    actor_emoji = random.choice(ACTOR_EMOJIS)
 
     def title_line(limit):
         t = (title[:limit] + '…') if len(title) > limit else title
         return f"📽 {t}"
 
-    # 【フック強化】レビュー件数・評価があれば、タイトルより前に置く一言フックを作る。
-    # 実データに基づく具体的な数字は「読者が目を止める」効果が高いため優先的に使う。
-    HOOK_EMOJIS = ['👀', '🔥', '📈']
-
-    def hook_line():
-        if review_avg and review_count:
-            e = random.choice(HOOK_EMOJIS)
-            return f"{e} レビュー{review_count}件で評価{review_avg:.1f}"
-        if review_count:
-            e = random.choice(HOOK_EMOJIS)
-            return f"{e} レビュー{review_count}件の話題作"
-        return None
+    def price_line():
+        return f"{price_emoji} {product['price']}" if product.get('price') else None
 
     def genre_tag_line(genre_limit):
-        genres = prioritize_genres(filter_hashtag_genres(product['genres']))[:genre_limit] if genre_limit else []
+        filtered_all = filter_hashtag_genres(product['genres'])
+        with_extra = [g for g in filtered_all if g in GENRE_EXTRA_HASHTAG_MAP]
+        without_extra = [g for g in filtered_all if g not in GENRE_EXTRA_HASHTAG_MAP]
+
+        genres = []
+        if genre_limit:
+            # 強化タグ付きジャンルを優先し、その中では末尾側（後方に書かれているもの）を優先する
+            take_extra = min(genre_limit, len(with_extra))
+            genres += with_extra[-take_extra:] if take_extra else []
+            remaining = genre_limit - len(genres)
+            if remaining > 0:
+                genres += without_extra[-remaining:]
         filtered = filter_hashtag_genres(genres)
         parts = []
         gt = genre_tags(filtered)
@@ -993,109 +896,110 @@ def build_x_single_post(product, char_limit=280):
             parts.append('　'.join(extras))
         return dedupe_hashtag_line('　'.join(parts))
 
-    # NTR作品の概要（NTR系ジャンルの場合はNTR特化の概要テンプレ、それ以外は汎用テンプレ）
-    overview = random.choice(NTR_COPY_TEMPLATES if IS_NTR_FOCUSED else COPY_TEMPLATES)
+    # 【bot感対策】毎回同じ並び順にならないよう、キャッチコピーの位置をランダムに変える
+    # （タイトルの前に置く／後に置く／独立行にする、の3パターン）
+    LAYOUT_VARIANTS = ['catchcopy_first', 'catchcopy_after_title', 'catchcopy_standalone']
+    layout = random.choice(LAYOUT_VARIANTS)
 
-    # 【bot感対策】毎回同じ絵文字にならないようランダムに選ぶ（候補数を増やしてパターンを分散）
-    PRICE_EMOJIS = ['💰', '🪙', '🏷️']
-    ACTOR_EMOJIS = ['👤', '🎭', '⭐']
-    price_emoji = random.choice(PRICE_EMOJIS)
-    actor_emoji = random.choice(ACTOR_EMOJIS)
-
-    def price_line():
-        return f"{price_emoji} {product['price']}" if product.get('price') else None
-
-    def assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview_text):
-        """本文（URLなし）を組み立てる。URLはXの表示抑制対策のためリプライ側に回す。"""
+    def assemble(title_limit, actor_limit, genre_limit, base_tags, include_catchcopy):
         actors = product['actors'][:actor_limit] if actor_limit else []
         act_tags = actor_tags(actors)
 
+        t_line = title_line(title_limit)
+        c_line = f"✏️ {catchcopy}" if (include_catchcopy and catchcopy) else None
+
         lines = []
-        h_line = hook_line()
-        if h_line:
-            lines.append(h_line)
-        lines.append(title_line(title_limit))
-        if include_overview and overview_text:
-            lines.append(f"📝 {overview_text}")
-        p_line = price_line()
-        if p_line:
-            lines.append(p_line)
+        if layout == 'catchcopy_first' and c_line:
+            lines.append(c_line)
+            lines.append(t_line)
+        elif layout == 'catchcopy_standalone' and c_line:
+            lines.append(t_line)
+        else:
+            lines.append(t_line)
+            if c_line:
+                lines.append(c_line)
+
+        lines.append(price_line())
         if act_tags:
             lines.append(f"{actor_emoji} {act_tags}")
+        lines = [l for l in lines if l]
 
-        return '\n'.join(lines)
+        # catchcopy_standalone のときは、キャッチコピーを本文と空行で区切って独立させる
+        if layout == 'catchcopy_standalone' and c_line:
+            body = '\n'.join(lines) + '\n\n' + c_line
+        else:
+            body = '\n'.join(lines)
 
-    def assemble_reply(genre_limit, base_tags):
-        """リプライ（2件目）を組み立てる：アフィリエイトURL＋ハッシュタグ。"""
         g_line = genre_tag_line(genre_limit)
         tag_line = dedupe_hashtag_line('　'.join(t for t in [g_line, base_tags] if t))
-        return '\n\n'.join([url, tag_line])
 
-    # --- 段階的に情報量を落として本文の文字数に収める ---
-    # 【重要】文字数の上限判定はスレッド1件目（本文）単体に対して行う。
-    #    URLとハッシュタグはリプライ（2件目）に分離しているため、本文側の
-    #    char_limitはX投稿の上限（280文字）をそのまま使ってよい。
+        parts = [body, url]
+        if tag_line:
+            parts.append(tag_line)
+        return '\n\n'.join(parts)
+
+    # --- 段階的に情報量を落として文字数に収める（金額・URL・#PRは最後まで残す） ---
     title_limit = 35
     base_tags = hashtags
     actor_limit = 3
     genre_limit = 3
-    include_overview = True
+    include_catchcopy = True
 
-    text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
-
-    if x_text_length(text) > char_limit:
-        # 1) 概要を切り詰める
-        over = x_text_length(text) - char_limit
-        overview = truncate_to_weighted_length(overview, max(10, x_text_length(overview) - over))
-        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
+    text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_catchcopy)
 
     if x_text_length(text) > char_limit:
-        # 2) 汎用ハッシュタグを最小限（#FANZAのみ）にする（※リプライ側のタグに影響）
+        # 1) 簡易キャッチコピーを外す（本当の内容紹介ではない付加情報のため最初に削る）
+        include_catchcopy = False
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_catchcopy)
+
+    if x_text_length(text) > char_limit:
+        # 2) 汎用ハッシュタグを最小限（#PR・#FANZAのみ）にする
         base_tags = minimal_disclosure_tags
-        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_catchcopy)
 
     if x_text_length(text) > char_limit:
-        # 3) 概要を丸ごと外す
-        include_overview = False
-        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
+        # 3) ジャンル・性癖系タグを3件→1件に絞る
+        genre_limit = 1
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_catchcopy)
 
     if x_text_length(text) > char_limit:
-        # 4) タイトルの表示文字数を縮める
-        title_limit = 20
-        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
+        # 4) ジャンル・性癖系タグを完全に外す
+        genre_limit = 0
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_catchcopy)
 
     if x_text_length(text) > char_limit:
         # 5) 出演者タグを3名→1名に絞る
         actor_limit = 1
-        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_catchcopy)
 
     if x_text_length(text) > char_limit:
-        # 6) ジャンル・性癖系タグを3件→1件に絞る（※リプライ側のタグに影響）
-        genre_limit = 1
-        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
+        # 6) 出演者タグを完全に外す
+        actor_limit = 0
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_catchcopy)
 
     if x_text_length(text) > char_limit:
-        # 7) 最終手段：タイトルの表示文字数をさらに縮める
+        # 7) 最終手段：作品名の表示文字数を縮める
         over = x_text_length(text) - char_limit
         title_limit = max(5, title_limit - over)
-        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_overview, overview)
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_catchcopy)
 
     assert x_text_length(text) <= char_limit, (
         f"⚠️ 投稿文字数超過: {x_text_length(text)} > {char_limit}\n{text}"
     )
 
-    reply_text = assemble_reply(genre_limit, base_tags)
-    # リプライも一応X上限内に収める（通常は本文よりずっと短いので超過はまず起きない想定）
-    if x_text_length(reply_text) > char_limit:
-        reply_text = truncate_to_weighted_length(reply_text, char_limit)
+    # FANZA TV（DMMプレミアム）の併用訴求を一定確率で追加
+    # （追加後の合計文字数が280文字を超える場合は追加しない）
+    if FANZA_TV_AFFILIATE_URL and random.random() < FANZA_TV_PROMO_RATE:
+        promo_block = f"\n\n{random.choice(FANZA_TV_PROMO_LINES)}\n{clean_url(FANZA_TV_AFFILIATE_URL)}"
+        candidate = text + promo_block
+        if x_text_length(candidate) <= char_limit:
+            text = candidate
 
-    # 本文（URLなし）とリプライ（URL＋タグ）の2ツイートに分割する。
+    # 今回は1ツイートで完結するため、スレッド分割は行わない（reply側は空）
     product['_thread_main'] = text
-    product['_thread_reply'] = reply_text
+    product['_thread_reply'] = ''
 
-    # save_posts等でのプレビュー表示・文字数集計用に、本文＋リプライを結合した全体像も返す。
-    # （実際にBufferへ投稿されるのは_thread_main/_thread_replyの方）
-    return '\n\n'.join([text, reply_text])
+    return text
 
 
 # ================================================================
@@ -1710,9 +1614,6 @@ print(f'🛍️  DMMから商品情報を取得中（フロア: {DMM_FLOOR} / �
 
 POSTED_HISTORY = load_posted_history()
 print(f'📚 過去に生成済みの品番: {len(POSTED_HISTORY)}件（重複はスキップします）')
-
-if EXCLUDE_MONTHLY_UNLIMITED:
-    load_monthly_unlimited_cids()  # ループ内で毎回取得しないよう、ここで先に1回だけ取得しておく
 generated_ids = set()  # このランでテキスト生成の対象になった品番（AUTO_POST_TO_X=false時の重複防止用）
 
 all_sections = []
@@ -1773,12 +1674,17 @@ for sort_key, sort_label in SORT_LIST:
                 continue
             if PRICE_RANGE_BOUNDS and not price_in_range(p):
                 continue
-            if is_monthly_unlimited(p):
-                print(f"    ⏭ 見放題ch対象のためスキップ: [{p.get('content_id','')}] {p['title'][:30]}")
-                continue
             # 配信日が実行時点より未来（予約商品・販売開始前）の場合はまだ投稿しない
             if is_future_release(p):
                 print(f"    ⏭ 配信日が未来のためスキップ: [{p.get('content_id','')}] {p['title'][:30]}（配信日: {p.get('date') or '不明'}）")
+                continue
+            if not p.get('sample_movie_url'):
+                print(f"    ⏭ サンプル動画なしのためスキップ: [{p.get('content_id','')}] {p['title'][:30]}")
+                continue
+            # videoc（素人・個人撮影）フロアは出演者名が登録されていない作品が多いため、
+            # 出演者情報なしでもスキップせずに投稿対象とする。
+            if not p.get('actors') and DMM_FLOOR != 'videoc':
+                print(f"    ⏭ 出演者情報なしのためスキップ: [{p.get('content_id','')}] {p['title'][:30]}")
                 continue
             products.append(p)
             # 価格フィルターなし or min_target未達の場合は remaining_quota で止める
