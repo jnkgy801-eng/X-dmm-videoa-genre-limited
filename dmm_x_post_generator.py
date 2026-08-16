@@ -276,6 +276,60 @@ FLOOR_SERVICE_MAP = {
     'digital': ('digital', 'videoa'),
 }
 
+# ----------------------------------------------------------------
+# 🩹 【母数超え対策】ランダム開始位置(POST_START_INDEX)が、実際の該当作品数
+#    (total_count)を超えてしまうと0件ヒットになってしまう問題への対処。
+#    ジャンル絞り込み(DMM_ARTICLE/DMM_ARTICLE_ID)を使っている場合、対象作品数が
+#    数百件どころか一桁台のこともあるため、ランダム値をそのまま使うと高確率で
+#    空振りする。ここで軽量な問い合わせ(hits=1)を1回行い、実際のtotal_countを
+#    取得した上でPOST_START_INDEXが範囲内に収まるよう補正する。
+#    ※POST_START_INDEXが明示指定されている場合は、ユーザーの意図を尊重し補正しない。
+# ----------------------------------------------------------------
+def _probe_total_count():
+    """軽量なItemList問い合わせ(hits=1)で、現在の絞り込み条件における
+    実際の該当作品数(total_count)を取得する。取得失敗時はNoneを返す。"""
+    service, floor_name = FLOOR_SERVICE_MAP.get(DMM_FLOOR, ('digital', 'videoa'))
+    params = {
+        'api_id':       DMM_API_ID,
+        'affiliate_id': DMM_AFFILIATE_ID,
+        'site':         'FANZA',
+        'service':      service,
+        'floor':        floor_name,
+        'hits':         1,
+        'offset':       1,
+        'sort':         'rank',
+        'output':       'json',
+    }
+    if DMM_ARTICLE and DMM_ARTICLE_ID:
+        params['article']    = DMM_ARTICLE
+        params['article_id'] = DMM_ARTICLE_ID
+    try:
+        resp = requests.get(f'{DMM_API_BASE}/ItemList', params=params, timeout=15)
+        result = resp.json().get('result', {})
+        total = result.get('total_count')
+        return int(total) if total is not None else None
+    except Exception as e:
+        print(f'  ⚠️  該当作品数の事前確認に失敗しました（{e}）。開始位置の補正はスキップします。')
+        return None
+
+
+if not POST_START_INDEX_EXPLICIT:
+    _total_count = _probe_total_count()
+    if _total_count is not None:
+        if _total_count == 0:
+            print('⚠️  現在の絞り込み条件（ジャンル/価格等）に該当する作品が0件です。')
+            print('    DMM_ARTICLE_IDやDMM_PRICE_RANGEの指定を見直してください。')
+        elif POST_START_INDEX > _total_count:
+            # 母数を超えないよう、安全な範囲(1〜total_count)に開始位置を再抽選する。
+            # あまり母数が少ない場合（例: 10件未満）は常に1件目からにして取りこぼしを防ぐ。
+            _safe_max = max(1, _total_count - DMM_HITS + 1) if _total_count > DMM_HITS else 1
+            _old_index = POST_START_INDEX
+            POST_START_INDEX = random.randint(1, _safe_max) if _safe_max > 1 else 1
+            DMM_OFFSET = POST_START_INDEX
+            print(f'🩹 該当作品数は{_total_count}件のみのため、取得開始番号を{_old_index}→{POST_START_INDEX}に補正しました。')
+        else:
+            print(f'✅ 該当作品数: {_total_count}件（開始番号{POST_START_INDEX}は範囲内のため補正不要）')
+
 HASHTAG_MAP = {
     # 【v3改善】非会員ユーザーにリーチしやすいタグ構成
     # #AV や #FANZAおすすめ は既存会員ばかりに届く傾向があるため変更
@@ -1648,7 +1702,12 @@ for sort_key, sort_label in SORT_LIST:
         fetch_offset = DMM_OFFSET
     fetch_hits    = DMM_HITS
     seen_ids      = set()
-    MAX_FETCH_ROUNDS = 20  # 無限ループ防止: 最大20回まで追加取得（20件確保のため増量）
+    # 【重複対策強化】過去投稿との重複が多いジャンル・条件でも、既定の投稿数
+    # （X_POST_LIMIT等のmin_target）に届くまで、可能な限り古いページまで
+    # さかのぼって取得を続ける。DMM API側にこれ以上データが無くなった時点
+    # （raw_itemsがfetch_hits未満で返る）で自然に打ち切られるため、
+    # ラウンド数の上限は「実質無制限」に近い大きな値にしておいてよい。
+    MAX_FETCH_ROUNDS = 500  # 無限ループ防止の最終安全弁（1ラウンド最大100件なら最大5万件まで走査）
 
     # 価格フィルター・サンプルフィルター両方を考慮して最低件数まで追加取得を続ける
     effective_min = min_target if min_target > 0 else 0
