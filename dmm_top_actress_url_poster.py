@@ -194,11 +194,13 @@ def build_actress_post(rank, name, appearance_count, list_url):
     """出演者一覧URLを使ったX投稿文を1件生成する。"""
     hashtags = HASHTAGS_BY_FLOOR.get(DMM_FLOOR, '#FANZA #PR')
     rank_emoji = {1: '🥇', 2: '🥈', 3: '🥉'}.get(rank, f'{rank}位')
+    # 女優名をハッシュタグ化（スペース除去。dmm_x_post_generator.pyのactor_tagsと同じ形式）
+    name_tag = '#' + name.replace(' ', '').replace('　', '')
 
     lead_variants = [
-        f'{rank_emoji} 今、人気の出演者 第{rank}位は「{name}」さん！',
-        f'{rank_emoji} 直近の人気作品ランキングで{rank}位に多数ランクイン中の「{name}」さん。',
-        f'{rank_emoji} 見放題・単品ともに勢いのある「{name}」さん、人気作品ランキング{rank}位です。',
+        f'{rank_emoji} 今、人気の出演者 第{rank}位は「{name_tag}」さん！',
+        f'{rank_emoji} 直近の人気作品ランキングで{rank}位に多数ランクイン中の「{name_tag}」さん。',
+        f'{rank_emoji} 見放題・単品ともに勢いのある「{name_tag}」さん、人気作品ランキング{rank}位です。',
     ]
     lead = lead_variants[(rank - 1) % len(lead_variants)]
 
