@@ -66,7 +66,7 @@ on:
       dmm_article_id:
         description: 'ジャンル絞り込みID（DMM APIのgenre一覧等から取得したID。1件のみ指定可）'
         required: false
-        default: '4111'
+        default: '6655'
         type: string
       min_process_count:
         description: '価格フィルター使用時の最低保証件数（この件数に達するまで追加取得）'
