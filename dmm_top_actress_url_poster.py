@@ -84,12 +84,12 @@ if AUTO_POST_TO_X and (not BUFFER_API_KEY or not BUFFER_CHANNEL_ID):
     AUTO_POST_TO_X = False
 
 HASHTAGS_BY_FLOOR = {
-    'videoa': '#アダルト動画 #FANZA #PR',
-    'videoc': '#素人動画 #FANZA #個人撮影 #PR',
-    'anime':  '#エロアニメ #FANZA #PR',
-    'doujin': '#同人誌 #FANZA #PR',
-    'comic':  '#エロ漫画 #FANZA #PR',
-    'goods':  '#大人グッズ #FANZA #PR',
+    'videoa': '#FANZA',
+    'videoc': '#FANZA ',
+    'anime':  '#FANZA',
+    'doujin': '#FANZA',
+    'comic':  '#FANZA',
+    'goods':  '#FANZA',
 }
 
 
