@@ -847,66 +847,23 @@ def x_text_length(text):
     return weighted
 
 
-# ----------------------------------------------------------------
-# 📝 簡易キャッチコピー生成（AI不使用・シリーズ名/ジャンル/メーカー名から機械的に組み立てる）
-#    DMM APIにはあらすじ・概要フィールドが存在しないため、本当の内容紹介ではなく
-#    「シリーズ名」「ジャンル」「メーカー名」といった手持ちのメタ情報から
-#    それっぽい一言を生成する簡易ロジック。無料・API呼び出しなし・処理は一瞬。
-# ----------------------------------------------------------------
-CATCHCOPY_TEMPLATES = [
-    "{info}が気になる一本",
-    "{info}をチェック",
-    "{info}な作品です",
-    "{info}系はこちら",
-    "{info}、思わず二度見した",
-    "{info}好きは見といた方がいい",
-    "{info}、地味に刺さった",
-    "{info}、今日一番気になった作品",
-    "{info}、サムネで止まった",
-    "{info}、これは覚えておきたい",
-]
-
-
-def build_catchcopy(product):
-    """シリーズ名・ジャンル・メーカー名から簡易的な一言キャッチコピーを組み立てる。
-    材料が何もない場合は空文字を返す（その場合は投稿文に含めない）。"""
-    parts = []
-    if product.get('series'):
-        parts.append(f"『{product['series']}』シリーズ")
-
-    genres = filter_hashtag_genres(product.get('genres') or [])
-    if genres:
-        parts.append('×'.join(genres[:2]))
-
-    if not parts and product.get('maker'):
-        parts.append(f"{product['maker']}の新作")
-
-    if not parts:
-        return ''
-
-    info = '　'.join(parts[:2])
-    return random.choice(CATCHCOPY_TEMPLATES).format(info=info)
-
-
 def build_x_single_post(product, char_limit=280):
-    """投稿文を「作品名・金額・出演者・アフィリエイトURL・ハッシュタグ」＋簡易キャッチコピーの
-    1ツイートで組み立てる。見出し・おすすめポイント（コピー文）・CTA・一言コメント・
+    """投稿文を「作品名・出演者・アフィリエイトURL・ハッシュタグ」のみの
+    1ツイートで組み立てる。金額・簡易キャッチコピー（一言）・見出し・CTA・
     サンプル動画URLは含めない。
 
     文字数が厳しい場合に削る優先順位（上ほど先に削る）:
-      1. 簡易キャッチコピー（シリーズ名/ジャンルから機械生成した一言）
-      2. 汎用ハッシュタグ（#アダルト動画 等）※ #PR は広告表記のため必ず残す
-      3. ジャンル・性癖系ハッシュタグ（🏷）を3件→1件→0件に
-      4. 出演者タグを3名→1名→0名に
-      5. 作品名の表示文字数を縮める（最終手段）
-    金額・アフィリエイトURL・#PRは常に含む。
+      1. 汎用ハッシュタグ（#アダルト動画 等）※ #PR は広告表記のため必ず残す
+      2. ジャンル・性癖系ハッシュタグ（🏷）を3件→1件→0件に
+      3. 出演者タグを3名→1名→0名に
+      4. 作品名の表示文字数を縮める（最終手段）
+    アフィリエイトURL・#PRは常に含む。
     """
     hashtags = HASHTAG_MAP.get(DMM_FLOOR, HASHTAG_MAP['default'])
     # 広告表記として必須の #PR に加え、#FANZA も必ず残す最小構成
     minimal_disclosure_tags = '#FANZA #PR'
     url = clean_url(product['affiliate_url'])
     title = product['title']
-    catchcopy = build_catchcopy(product)
 
     url_ok = check_url(url) if url else None
     if url and url_ok is False:
@@ -915,17 +872,12 @@ def build_x_single_post(product, char_limit=280):
     product['sample_check'] = None
 
     # 【bot感対策】毎回同じ絵文字にならないようランダムに選ぶ
-    PRICE_EMOJIS = ['💰', '🪙']
     ACTOR_EMOJIS = ['👤', '🎭']
-    price_emoji = random.choice(PRICE_EMOJIS)
     actor_emoji = random.choice(ACTOR_EMOJIS)
 
     def title_line(limit):
         t = (title[:limit] + '…') if len(title) > limit else title
         return f"📽 {t}"
-
-    def price_line():
-        return f"{price_emoji} {product['price']}" if product.get('price') else None
 
     def genre_tag_line(genre_limit):
         filtered_all = filter_hashtag_genres(product['genres'])
@@ -950,39 +902,15 @@ def build_x_single_post(product, char_limit=280):
             parts.append('　'.join(extras))
         return dedupe_hashtag_line('　'.join(parts))
 
-    # 【bot感対策】毎回同じ並び順にならないよう、キャッチコピーの位置をランダムに変える
-    # （タイトルの前に置く／後に置く／独立行にする、の3パターン）
-    LAYOUT_VARIANTS = ['catchcopy_first', 'catchcopy_after_title', 'catchcopy_standalone']
-    layout = random.choice(LAYOUT_VARIANTS)
-
-    def assemble(title_limit, actor_limit, genre_limit, base_tags, include_catchcopy):
+    def assemble(title_limit, actor_limit, genre_limit, base_tags):
         actors = product['actors'][:actor_limit] if actor_limit else []
         act_tags = actor_tags(actors)
 
-        t_line = title_line(title_limit)
-        c_line = f"✏️ {catchcopy}" if (include_catchcopy and catchcopy) else None
-
-        lines = []
-        if layout == 'catchcopy_first' and c_line:
-            lines.append(c_line)
-            lines.append(t_line)
-        elif layout == 'catchcopy_standalone' and c_line:
-            lines.append(t_line)
-        else:
-            lines.append(t_line)
-            if c_line:
-                lines.append(c_line)
-
-        lines.append(price_line())
+        lines = [title_line(title_limit)]
         if act_tags:
             lines.append(f"{actor_emoji} {act_tags}")
-        lines = [l for l in lines if l]
 
-        # catchcopy_standalone のときは、キャッチコピーを本文と空行で区切って独立させる
-        if layout == 'catchcopy_standalone' and c_line:
-            body = '\n'.join(lines) + '\n\n' + c_line
-        else:
-            body = '\n'.join(lines)
+        body = '\n'.join(lines)
 
         g_line = genre_tag_line(genre_limit)
         tag_line = dedupe_hashtag_line('　'.join(t for t in [g_line, base_tags] if t))
@@ -992,50 +920,44 @@ def build_x_single_post(product, char_limit=280):
             parts.append(tag_line)
         return '\n\n'.join(parts)
 
-    # --- 段階的に情報量を落として文字数に収める（金額・URL・#PRは最後まで残す） ---
+    # --- 段階的に情報量を落として文字数に収める（URL・#PRは最後まで残す） ---
     title_limit = 35
     base_tags = hashtags
     actor_limit = 3
     genre_limit = 3
-    include_catchcopy = True
 
-    text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_catchcopy)
-
-    if x_text_length(text) > char_limit:
-        # 1) 簡易キャッチコピーを外す（本当の内容紹介ではない付加情報のため最初に削る）
-        include_catchcopy = False
-        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_catchcopy)
+    text = assemble(title_limit, actor_limit, genre_limit, base_tags)
 
     if x_text_length(text) > char_limit:
-        # 2) 汎用ハッシュタグを最小限（#PR・#FANZAのみ）にする
+        # 1) 汎用ハッシュタグを最小限（#PR・#FANZAのみ）にする
         base_tags = minimal_disclosure_tags
-        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_catchcopy)
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags)
 
     if x_text_length(text) > char_limit:
-        # 3) ジャンル・性癖系タグを3件→1件に絞る
+        # 2) ジャンル・性癖系タグを3件→1件に絞る
         genre_limit = 1
-        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_catchcopy)
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags)
 
     if x_text_length(text) > char_limit:
-        # 4) ジャンル・性癖系タグを完全に外す
+        # 3) ジャンル・性癖系タグを完全に外す
         genre_limit = 0
-        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_catchcopy)
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags)
 
     if x_text_length(text) > char_limit:
-        # 5) 出演者タグを3名→1名に絞る
+        # 4) 出演者タグを3名→1名に絞る
         actor_limit = 1
-        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_catchcopy)
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags)
 
     if x_text_length(text) > char_limit:
-        # 6) 出演者タグを完全に外す
+        # 5) 出演者タグを完全に外す
         actor_limit = 0
-        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_catchcopy)
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags)
 
     if x_text_length(text) > char_limit:
-        # 7) 最終手段：作品名の表示文字数を縮める
+        # 6) 最終手段：作品名の表示文字数を縮める
         over = x_text_length(text) - char_limit
         title_limit = max(5, title_limit - over)
-        text = assemble(title_limit, actor_limit, genre_limit, base_tags, include_catchcopy)
+        text = assemble(title_limit, actor_limit, genre_limit, base_tags)
 
     assert x_text_length(text) <= char_limit, (
         f"⚠️ 投稿文字数超過: {x_text_length(text)} > {char_limit}\n{text}"
