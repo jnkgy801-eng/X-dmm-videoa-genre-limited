@@ -121,7 +121,7 @@ jobs:
           MIN_PROCESS_COUNT:    ${{ github.event.inputs.min_process_count || '10' }}
           SAVE_TO_REPO:         'true'
           AUTO_POST_TO_X:       ${{ github.event.inputs.auto_post_to_x || 'true' }}
-          X_POST_LIMIT:         ${{ github.event.inputs.x_post_limit || '10' }}
+          X_POST_LIMIT:         ${{ github.event.inputs.x_post_limit || '2' }}
           # 【シャドウバン対策】サンプル動画の冒頭を数秒だけ切り出して投稿する機能。
           # ENABLE_VIDEO_CLIP=false にすると、従来どおりサンプル動画をフル添付する動作に戻せる。
           # 【地域制限のため既定でOFF】DMMのサンプル動画CDNは日本国内IP以外からの
